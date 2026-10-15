@@ -1,0 +1,119 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Agent tool directories
+.adal/
+.agents/
+.aider-desk/
+.augment/
+.autohand/
+.bob/
+.claude/
+.codeartsdoer/
+.codebuddy/
+.codemaker/
+.codestudio/
+.commandcode/
+.continue/
+.cortex/
+.crush/
+.todes/
+.fx/
+.goose/
+.grok/
+.hermes/
+.iflow/
+.inferencesh/
+.jazz/
+.junie/
+.kimchi/
+.kiro/
+.kode/
+.lingma/
+.mcpjam/
+.minimax/
+.moxby/
+.mux/
+.neovate/
+.ona/
+.openhands/
+.pochi/
+.posit/
+.qoder/
+.qwen/
+.reasonix/
+.roo/
+.rovodev/
+.tabnine/
+.terramind/
+.tinycloud/
+.trae/
+.vibe/
+.windsurf/
+.zcode/
+.zencoder/
+
+# Git
+.git/
+*.git/
+.gitattributes
+
+# Work directory contents
+scratch/live_snapshots/
+scratch/out_*.txt
+scratch/real_run.txt
+scratch/cycle_run.txt
+scratch/sweep_run*.txt
+scratch/smoke_out.txt
+scratch/verify_*.txt
+scratch/out_*.txt
+
+# Output reports (regenerated)
+outputs/*.json
+output*.json

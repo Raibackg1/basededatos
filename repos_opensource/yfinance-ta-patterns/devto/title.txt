@@ -1,0 +1,1 @@
+Why 90% of Candlestick Patterns Fail: Building an Institutional AI Confluence Scanner in Python

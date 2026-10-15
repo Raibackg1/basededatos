@@ -1,0 +1,282 @@
+/* eslint-disable no-console */
+/* global performance */
+const { hammer } = require("./src/hammer.js");
+const { precomputeCandleProps } = require("./src/utils.js");
+const { patternChain, allPatterns } = require("./src/patternChain.js");
+
+function generateCandles(n) {
+  return Array.from({ length: n }, () => {
+    const open = 50 + Math.random() * 50;
+    const close = 50 + Math.random() * 50;
+    const high = Math.max(open, close) + Math.random() * 10;
+    const low = Math.min(open, close) - Math.random() * 10;
+    return { open, high, low, close };
+  });
+}
+
+const WARMUP_RUNS = 1;
+const TIMED_RUNS = 5;
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+// Runs `fn` WARMUP_RUNS times (discarded, lets the JIT warm up) then
+// TIMED_RUNS times, returning the median wall-clock time and the last
+// return value. A single performance.now() sample is too noisy on shared
+// CI runners (GC pauses, neighbor jitter) and was producing spurious
+// performance-alert comments on PRs with no actual code-path change.
+function measureMedian(fn) {
+  let result;
+  for (let i = 0; i < WARMUP_RUNS; i += 1) result = fn();
+  const times = [];
+  for (let i = 0; i < TIMED_RUNS; i += 1) {
+    const start = performance.now();
+    result = fn();
+    times.push(performance.now() - start);
+  }
+  return { time: median(times), result };
+}
+
+function runBenchmark(size, name) {
+  console.log(`\n${"=".repeat(60)}`);
+  console.log(`Benchmark: ${name} (N=${size.toLocaleString()})`);
+  console.log("=".repeat(60));
+
+  const candles = generateCandles(size);
+
+  // Memory: measured around a single dedicated pass, kept separate from
+  // the warm-up/timed-median loop below — running that loop first would
+  // inflate the heap delta with garbage from the repeated executions.
+  const startMem = process.memoryUsage().heapUsed;
+  const precomputed = precomputeCandleProps(candles);
+  const hammerResultsPrecomputed = hammer(precomputed);
+  hammer(candles);
+  const chainResultsPrecomputed = patternChain(precomputed, allPatterns);
+  patternChain(candles, allPatterns);
+  const endMem = process.memoryUsage().heapUsed;
+  const memDelta = ((endMem - startMem) / 1024 / 1024).toFixed(2);
+
+  // Timing: median of WARMUP_RUNS + TIMED_RUNS repeated executions.
+  const { time: precomputeTime } = measureMedian(() =>
+    precomputeCandleProps(candles),
+  );
+  const { time: hammerPrecomputeTime } = measureMedian(() =>
+    hammer(precomputed),
+  );
+  const { time: hammerRawTime } = measureMedian(() => hammer(candles));
+  const { time: chainPrecomputeTime } = measureMedian(() =>
+    patternChain(precomputed, allPatterns),
+  );
+  const { time: chainRawTime } = measureMedian(() =>
+    patternChain(candles, allPatterns),
+  );
+
+  // Results
+  console.log("\nPrecomputation:");
+  console.log(`  Time: ${precomputeTime.toFixed(2)} ms`);
+  console.log(
+    `  Throughput: ${((size / precomputeTime) * 1000).toFixed(0)} candles/sec`,
+  );
+
+  console.log("\nHammer Pattern (single pattern):");
+  console.log(`  With precompute: ${hammerPrecomputeTime.toFixed(2)} ms`);
+  console.log(`  Without precompute: ${hammerRawTime.toFixed(2)} ms`);
+  console.log(
+    `  Speedup: ${(hammerRawTime / hammerPrecomputeTime).toFixed(2)}x`,
+  );
+  console.log(`  Matches found: ${hammerResultsPrecomputed.length}`);
+  console.log(
+    `  Throughput: ${((size / hammerPrecomputeTime) * 1000).toFixed(0)} candles/sec`,
+  );
+
+  console.log("\nPattern Chain (all patterns):");
+  console.log(`  Patterns tested: ${allPatterns.length}`);
+  console.log(`  With precompute: ${chainPrecomputeTime.toFixed(2)} ms`);
+  console.log(`  Without precompute: ${chainRawTime.toFixed(2)} ms`);
+  console.log(`  Speedup: ${(chainRawTime / chainPrecomputeTime).toFixed(2)}x`);
+  console.log(`  Total matches found: ${chainResultsPrecomputed.length}`);
+  console.log(
+    `  Throughput: ${((size / chainPrecomputeTime) * 1000).toFixed(0)} candles/sec`,
+  );
+  console.log(
+    `  Patterns per second: ${(((size * allPatterns.length) / chainPrecomputeTime) * 1000).toFixed(0)}`,
+  );
+
+  console.log("\nMemory:");
+  console.log(`  Delta: ${memDelta} MB`);
+  console.log(`  Per candle: ${((memDelta * 1024) / size).toFixed(2)} KB`);
+
+  return {
+    size,
+    precomputeTime,
+    hammerPrecomputeTime,
+    hammerRawTime,
+    chainPrecomputeTime,
+    chainRawTime,
+    hammerMatches: hammerResultsPrecomputed.length,
+    chainMatches: chainResultsPrecomputed.length,
+    memDelta: parseFloat(memDelta),
+  };
+}
+
+// Main benchmark execution
+console.log("Candlestick Pattern Detection Benchmark");
+console.log("========================================");
+console.log(`Node.js version: ${process.version}`);
+console.log(`Platform: ${process.platform} ${process.arch}`);
+console.log(
+  `CPUs: ${require("os").cpus().length}x ${require("os").cpus()[0].model}`,
+);
+
+const sizes = [100, 1_000, 10_000, 100_000, 1_000_000];
+const results = [];
+
+for (const size of sizes) {
+  const result = runBenchmark(
+    size,
+    `Dataset ${sizes.indexOf(size) + 1}/${sizes.length}`,
+  );
+  results.push(result);
+}
+
+// Summary table
+console.log("\n" + "=".repeat(60));
+console.log("SUMMARY TABLE");
+console.log("=".repeat(60));
+console.log(
+  "\n| Size | Hammer (ms) | Chain (ms) | Chain Speed (candles/s) | Memory (MB) |",
+);
+console.log(
+  "|------|-------------|------------|------------------------|-------------|",
+);
+for (const r of results) {
+  const sizeStr = r.size.toLocaleString().padEnd(12);
+  const hammerStr = r.hammerPrecomputeTime.toFixed(2).padEnd(11);
+  const chainStr = r.chainPrecomputeTime.toFixed(2).padEnd(10);
+  const speedStr = ((r.size / r.chainPrecomputeTime) * 1000)
+    .toFixed(0)
+    .padEnd(22);
+  const memStr = r.memDelta.toFixed(2).padEnd(11);
+  console.log(
+    `| ${sizeStr} | ${hammerStr} | ${chainStr} | ${speedStr} | ${memStr} |`,
+  );
+}
+
+// JSON output for automation (--json flag)
+if (process.argv.includes("--json")) {
+  const jsonPath =
+    process.argv[process.argv.indexOf("--json") + 1] || "bench-results.json";
+  const fs = require("fs");
+
+  // github-action-benchmark customSmallerIsBetter format
+  const benchEntries = results.flatMap((r) => {
+    const label = r.size.toLocaleString();
+    return [
+      {
+        name: `Pattern Chain ${label}`,
+        unit: "ms",
+        value: parseFloat(r.chainPrecomputeTime.toFixed(1)),
+      },
+      {
+        name: `Hammer ${label}`,
+        unit: "ms",
+        value: parseFloat(r.hammerPrecomputeTime.toFixed(2)),
+      },
+      { name: `Memory ${label}`, unit: "MB", value: r.memDelta },
+    ];
+  });
+
+  // Wrapper with both formats: CI action reads .entries, update script reads .table
+  const output = {
+    entries: benchEntries,
+    table: results.map((r) => ({
+      size: r.size,
+      chainMs: parseFloat(r.chainPrecomputeTime.toFixed(1)),
+      throughput: Math.round((r.size / r.chainPrecomputeTime) * 1000),
+      memoryMb: r.memDelta,
+    })),
+  };
+
+  fs.writeFileSync(jsonPath, JSON.stringify(output, null, 2));
+  console.log(`\nResults written to ${jsonPath}`);
+}
+
+console.log("\nBenchmark completed successfully! ✓");
+
+// Streaming benchmark
+console.log("\n" + "=".repeat(60));
+console.log("STREAMING BENCHMARK");
+console.log("=".repeat(60));
+
+const { createStream } = require("./src/streaming.js");
+
+// Two independent axes, previously conflated (#118):
+//   feedSize  - how many candles are handed to process() per call
+//   chunkSize - the stream's internal buffer threshold
+// Varying the first says nothing about the second, so each row states both.
+const STREAM_PATTERNS = ["hammer", "doji"];
+const streamPatternFns = allPatterns.filter((p) =>
+  STREAM_PATTERNS.includes(p.name),
+);
+// chunkSize must be at least the longest active pattern (#117), so the sweep
+// is clamped rather than silently throwing partway through a run.
+const MIN_CHUNK_SIZE = Math.max(...streamPatternFns.map((p) => p.paramCount));
+
+function runStreamBenchmark(totalCandles, feedSize, chunkSize) {
+  if (chunkSize < MIN_CHUNK_SIZE) {
+    throw new Error(
+      `benchmark misconfigured: chunkSize ${chunkSize} is below the minimum ` +
+        `${MIN_CHUNK_SIZE} for patterns ${STREAM_PATTERNS.join(", ")}`,
+    );
+  }
+
+  const data = generateCandles(totalCandles);
+  const chunks = [];
+  for (let i = 0; i < data.length; i += feedSize) {
+    chunks.push(data.slice(i, i + feedSize));
+  }
+
+  const start = performance.now();
+  const stream = createStream({ patterns: STREAM_PATTERNS, chunkSize });
+  for (const chunk of chunks) stream.process(chunk);
+  const summary = stream.end();
+  const elapsed = performance.now() - start;
+
+  // Cheap correctness guard: a run that silently dropped candles is not a
+  // measurement worth reporting.
+  if (summary.totalProcessed !== totalCandles) {
+    throw new Error(
+      `benchmark processed ${summary.totalProcessed} of ${totalCandles} candles ` +
+        `(feed=${feedSize}, chunkSize=${chunkSize})`,
+    );
+  }
+
+  console.log(
+    `  ${totalCandles.toLocaleString().padStart(9)} candles | feed ${String(feedSize).padStart(5)} | chunkSize ${String(chunkSize).padStart(5)} → ${elapsed.toFixed(2).padStart(8)} ms (${((totalCandles / elapsed) * 1000).toFixed(0).padStart(9)} candles/sec)`,
+  );
+}
+
+console.log(
+  `\nMeasuring ${streamPatternFns.length} of ${allPatterns.length} patterns ` +
+    `(${STREAM_PATTERNS.join(", ")} — both single-candle), so these figures are` +
+    `\nnot representative of the streaming API over the full pattern set.`,
+);
+
+console.log(
+  "\nFeed size (candles per process() call), chunkSize fixed at 1000:",
+);
+runStreamBenchmark(100_000, 1, 1000);
+runStreamBenchmark(100_000, 500, 1000);
+runStreamBenchmark(100_000, 1000, 1000);
+runStreamBenchmark(100_000, 10_000, 1000);
+
+console.log("\nchunkSize (internal buffer threshold), feed fixed at 1000:");
+runStreamBenchmark(100_000, 1000, MIN_CHUNK_SIZE);
+runStreamBenchmark(100_000, 1000, 100);
+runStreamBenchmark(100_000, 1000, 1000);
+runStreamBenchmark(100_000, 1000, 10_000);

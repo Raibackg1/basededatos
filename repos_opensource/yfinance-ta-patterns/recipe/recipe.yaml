@@ -1,0 +1,45 @@
+context:
+  name: yfinance-ta-patterns
+  version: "0.3.60"
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  noarch: python
+  script: ${{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
+  python:
+    entry_points:
+      - yfinance-ta-patterns = yfinance_ta_patterns.cli:main
+      - yftp = yfinance_ta_patterns.cli:main
+      - yfinance-ta-mcp = yfinance_ta_patterns.mcp_server:main_mcp
+
+requirements:
+  host:
+    - python >=3.8
+    - pip
+    - setuptools >=68
+    - wheel
+  run:
+    - python >=3.8
+    - pandas >=1.3.0
+    - numpy >=1.20
+    - rich >=10.0.0
+    - pytz >=2022.5
+    - yfinance >=0.2.54
+
+tests:
+  - python:
+      imports:
+        - yfinance_ta_patterns
+      pip_check: true
+
+about:
+  homepage: https://github.com/eminsk/yfinance-ta-patterns
+  license: MIT
+  summary: Institutional-grade market candlestick pattern scanner with multi-asset backtesting and AI confluence scoring

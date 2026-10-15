@@ -1,0 +1,313 @@
+# CLI Tool Guide - Candlestick Pattern Detection
+
+The Candlestick library includes a command-line interface for detecting patterns in CSV or JSON files.
+
+## Installation
+
+After installing the package:
+
+```bash
+npm install -g candlestick
+```
+
+Or use locally:
+
+```bash
+npm install candlestick
+npx candlestick --help
+```
+
+## Basic Usage
+
+### Detect Patterns in JSON File
+
+```bash
+candlestick -i data.json
+```
+
+### Detect Patterns in CSV File
+
+```bash
+candlestick -i data.csv --output table
+```
+
+### Without a Flag
+
+The input path can be passed on its own, which is equivalent to `-i`:
+
+```bash
+candlestick data.json --output table
+```
+
+For a path that begins with a dash, put it after `--` so it is not read as an
+option:
+
+```bash
+candlestick --output table -- ./-odd-name.csv
+```
+
+Everything after `--` is treated as a path, so options go before it.
+
+### Use with Pipes (stdin)
+
+Omitting `--input` reads from stdin, and `-` is accepted as an explicit
+spelling of the same thing. JSON and CSV both pipe: the format is detected from
+the first non-blank line, so no flag is needed.
+
+```bash
+cat data.json | candlestick --output table
+cat data.json | candlestick --input - --output table
+```
+
+## Options
+
+| Option               | Short | Description                                     | Default |
+| -------------------- | ----- | ----------------------------------------------- | ------- |
+| `--input <file>`     | `-i`  | Input CSV or JSON file, or `-` for stdin        | stdin   |
+| `--output <format>`  | `-o`  | Output format: json, table, csv                 | json    |
+| `--patterns <list>`  | `-p`  | Comma-separated pattern names                   | all     |
+| `--confidence <min>` | `-c`  | Minimum confidence threshold (0-1)              | 0       |
+| `--type <type>`      | `-t`  | Filter by type: reversal, continuation, neutral | none    |
+| `--direction <dir>`  | `-d`  | Filter by direction: bullish, bearish, neutral  | none    |
+| `--validate`         |       | Validate OHLC data before processing            | false   |
+| `--metadata`         |       | Include pattern metadata in JSON output         | false   |
+| `--help`             | `-h`  | Show help message                               |         |
+| `--`                 |       | End of options; the rest is a file path         |         |
+
+An option that is missing its value is an error rather than a mis-parse:
+`candlestick -i -o csv` reports `-i requires a value` instead of reading a file
+named `-o`. An unrecognised option is an error too, rather than being ignored.
+A value may not begin with `-`, with the single exception of `-` itself; use
+`--` for a path that does.
+
+`--metadata` only affects `--output json`, where it adds a nested `metadata`
+object to each result. The `table` and `csv` formats have fixed type,
+direction, confidence and strength columns, so they always include metadata
+whether or not the flag is passed.
+
+## Input Formats
+
+### JSON Format
+
+```json
+[
+  { "open": 10, "high": 15, "low": 8, "close": 12 },
+  { "open": 12, "high": 16, "low": 11, "close": 14 }
+]
+```
+
+### CSV Format
+
+```csv
+open,high,low,close
+10,15,8,12
+12,16,11,14
+```
+
+**Note:** First line must contain headers: `open,high,low,close`
+
+## Output Formats
+
+### JSON Output
+
+```bash
+candlestick -i data.json --output json --metadata
+```
+
+```json
+[
+  {
+    "index": 0,
+    "pattern": "piercingLine",
+    "match": [...],
+    "metadata": {
+      "type": "reversal",
+      "direction": "bullish",
+      "confidence": 0.8,
+      "strength": "strong",
+      "description": "Bullish reversal piercing into bearish candle"
+    }
+  }
+]
+```
+
+### Table Output
+
+```bash
+candlestick -i data.json --output table
+```
+
+```
+┌─────────┬─────────────────────┬────────────┬────────────┬────────────┐
+│  Index  │       Pattern       │    Type    │ Confidence │  Strength  │
+├─────────┼─────────────────────┼────────────┼────────────┼────────────┤
+│ 0       │ piercingLine        │ reversal   │ 0.80       │ strong     │
+│ 2       │ darkCloudCover      │ reversal   │ 0.80       │ strong     │
+└─────────┴─────────────────────┴────────────┴────────────┴────────────┘
+```
+
+### CSV Output
+
+```bash
+candlestick -i data.json --output csv
+```
+
+```csv
+index,pattern,type,direction,confidence,strength
+0,piercingLine,reversal,bullish,0.8,strong
+2,darkCloudCover,reversal,bearish,0.8,strong
+```
+
+## Examples
+
+### Detect Specific Patterns
+
+```bash
+candlestick -i data.json --patterns hammer,doji,bullishEngulfing
+```
+
+### High Confidence Patterns Only
+
+```bash
+candlestick -i data.json --confidence 0.85 --output table --metadata
+```
+
+### Bullish Reversal Patterns
+
+```bash
+candlestick -i data.json --type reversal --direction bullish --metadata
+```
+
+### Validate Data Before Processing
+
+```bash
+candlestick -i data.json --validate --output table
+```
+
+### Pipeline Processing
+
+```bash
+# Download data and detect patterns
+curl https://api.example.com/ohlc | candlestick --output csv
+
+# Process multiple files
+for file in data/*.json; do
+  candlestick -i "$file" --confidence 0.8 --output csv
+done
+```
+
+## Pattern Names
+
+Use these names with the `--patterns` option:
+
+**Single Candle:**
+
+- `hammer`, `bullishHammer`, `bearishHammer`
+- `invertedHammer`, `bullishInvertedHammer`, `bearishInvertedHammer`
+- `doji`
+
+**Two Candles:**
+
+- `bullishEngulfing`, `bearishEngulfing`
+- `bullishHarami`, `bearishHarami`
+- `bullishKicker`, `bearishKicker`
+- `hangingMan`, `shootingStar`
+- `piercingLine`, `darkCloudCover`
+
+**Three Candles:**
+
+- `morningStar`, `eveningStar`
+- `threeWhiteSoldiers`, `threeBlackCrows`
+
+**v1.2.0 Patterns:**
+
+- `marubozu`, `bullishMarubozu`, `bearishMarubozu`
+- `spinningTop`, `bullishSpinningTop`, `bearishSpinningTop`
+- `tweezersTop`, `tweezersBottom`
+
+## Advanced Usage
+
+### Filter Strong Bullish Signals
+
+```bash
+candlestick -i data.json \
+  --direction bullish \
+  --confidence 0.85 \
+  --output table \
+  --metadata
+```
+
+### Export for Further Processing
+
+```bash
+# Get high-confidence patterns as CSV
+candlestick -i data.json --confidence 0.8 --output csv > high-confidence.csv
+
+# Process with jq
+candlestick -i data.json --output json | jq '.[] | select(.index > 10)'
+```
+
+### Validation Mode
+
+```bash
+# Validate data without detection
+candlestick -i suspicious-data.json --validate --patterns doji
+```
+
+If data is invalid, the CLI will exit with error code 1 and show descriptive error message.
+
+## Exit Codes
+
+- `0`: Success
+- `1`: Error (invalid data, file not found, etc.)
+
+## Performance
+
+The CLI tool uses the same high-performance engine as the library:
+
+- **Throughput:** 59,000+ candles/second
+- **Memory:** Efficient for large datasets (Streaming API available)
+- **Patterns:** All 29 pattern variants
+
+## Programmatic Use
+
+The CLI functions can be used programmatically from Node.js:
+
+```js
+const { readInput, processData } = require("candlestick/cli");
+
+const data = readInput("data.json");
+const results = processData(data, { confidence: 0.8 });
+```
+
+## Troubleshooting
+
+**"CSV must have headers"**
+
+- Ensure first line has: `open,high,low,close`
+
+**"Invalid OHLC data"**
+
+- Use `--validate` flag to see specific validation errors
+- Check that high >= low, high >= open/close, etc.
+
+**"Could not parse input as JSON/CSV, detected from its content"**
+
+- A `.json` or `.csv` extension picks the parser outright. Without one — stdin,
+  no extension, or any other extension — the format is detected from the first
+  non-blank line: `{` or `[` means JSON, anything else is tried as CSV.
+- This message means the detected format failed to parse. The original error is
+  attached as the cause, and usually says what is actually wrong.
+- Rename the file with a `.json` or `.csv` extension to choose explicitly.
+
+## More Information
+
+- [README.md](../README.md) - Main documentation
+- [examples/](../examples/) - Code examples
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical details
+
+---
+
+**The CLI ships with Candlestick v1.1.0+.** It requires Node.js >= 20; the
+authoritative floor is `engines` in `package.json`, and the tested matrix is in
+[CONTRIBUTING.md](../CONTRIBUTING.md).

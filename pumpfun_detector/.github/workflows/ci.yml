@@ -1,0 +1,59 @@
+# CI: protege el loop de ganancia real medible en cada push/PR.
+#
+# Qué valida:
+#   1. compile-check de TODOS los módulos (nada roto por sintaxis).
+#   2. La suite COMPLETA de tests (P0 + P1 + batch profitability: branch_gate,
+#      feature_drift, slippage_model, leak_adversarial), offline y determinista.
+#   3. El loop end-to-end real: regenera la BD sintética y analiza de punta a
+#      punta (features -> anti-fuga -> señales -> reporte), comprobando que
+#      arranca y produce los artefactos esperados.
+#
+# Nota honesta: NO se incluye el escaneo de BD externa (test_database_audit)
+# porque depende de una base canónica fuera del repo (no reproducible en CI).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scipy scikit-learn
+
+      - name: Compile-check (todos los módulos)
+        run: python -m compileall -q detector main.py demo_data.py
+
+      - name: Full test suite (discover)
+        env:
+          PYTHONPATH: .
+        run: python -m unittest discover -s tests -v
+
+      - name: End-to-end demo loop (regenera BD y analiza)
+        env:
+          PYTHONPATH: .
+        run: |
+          python main.py --demo --out /tmp/ci_resultados
+          test -f /tmp/ci_resultados/reporte.html
+          test -f /tmp/ci_resultados/reglas_produccion.json
+          echo "Loop end-to-end OK: artefactos generados."

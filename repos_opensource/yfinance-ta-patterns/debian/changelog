@@ -1,0 +1,65 @@
+yfinance-ta-patterns (0.3.60-1) unstable; urgency=medium
+
+  * Release v0.3.60: Support positional ticker CLI arguments (yftp SPY, yftp NVDA AAPL), native MCP CLI flag (--mcp), smithery.yaml AI agent registry integration, and frontier reasoning model prompts.
+
+ -- eminsk <M_N_N@tut.by>  Tue, 13 Oct 2026 17:10:00 +0000
+
+yfinance-ta-patterns (0.3.48-1) unstable; urgency=medium
+
+  * Release v0.3.48: MCP lifecycle version negotiation for 2025-11-25, institutional tool annotations/outputSchema, raw UTF-8 token optimization without \\uXXXX escaping, compact watchlist mode, UTC time labeling, and removal of synthetic macro calendar data.
+
+ -- eminsk <M_N_N@tut.by>  Tue, 06 Oct 2026 14:00:00 +0000
+
+yfinance-ta-patterns (0.3.47-1) unstable; urgency=medium
+
+  * Release v0.3.47: Production-grade MCP server hardening (stdout isolation, cp1251 safety, watchlist error diagnostics, intraday period clamping) and economic calendar tool (ta_get_economic_calendar) for selected assets.
+
+ -- eminsk <M_N_N@tut.by>  Tue, 06 Oct 2026 12:15:00 +0000
+
+yfinance-ta-patterns (0.3.46-1) unstable; urgency=medium
+
+  * Release v0.3.46: Add Native Model Context Protocol (MCP) Server (yfinance-ta-mcp) and Python 3.16 / No-GIL 3.16t support.
+
+ -- eminsk <M_N_N@tut.by>  Tue, 06 Oct 2026 10:40:00 +0000
+
+yfinance-ta-patterns (0.3.45-1) unstable; urgency=medium
+
+  * Release v0.3.45: 100.000% parity with canonical TA-Lib across all 61 patterns, Greg Morris boundary matching (+-80), rolling sum lookbacks, and pure-Python PyPy 3.12 support.
+
+ -- eminsk <M_N_N@tut.by>  Mon, 28 Sep 2026 17:00:00 +0000
+
+yfinance-ta-patterns (0.3.40-1) unstable; urgency=medium
+
+  * Release v0.3.40: Cross-platform pytest test suite on Python 3.8-3.14 & PyPy 3.10, PyPy 3.8-3.11 prebuilt wheel caching, macOS LibreSSL warning filter, and CI execution optimizations.
+
+ -- eminsk <M_N_N@tut.by>  Sun, 27 Sep 2026 02:30:00 +0000
+
+yfinance-ta-patterns (0.3.39-1) unstable; urgency=medium
+
+  * Release v0.3.39: Rich terminal executive briefs for AI Analyst, single-symbol lookback filtering, recency-aware setup ranking, and universal financial price precision.
+
+ -- eminsk <M_N_N@tut.by>  Sun, 27 Sep 2026 00:05:00 +0000
+
+yfinance-ta-patterns (0.3.38-1) unstable; urgency=medium
+
+  * Release v0.3.38: Perfect monospace markdown table alignment, clean ASCII direction flags, and UTF-8 console output safety.
+
+ -- eminsk <M_N_N@tut.by>  Sat, 26 Sep 2026 23:45:00 +0000
+
+yfinance-ta-patterns (0.3.37-1) unstable; urgency=medium
+
+  * Release v0.3.37: Rich terminal interface, table alignment, and price precision formatting.
+
+ -- eminsk <M_N_N@tut.by>  Sat, 26 Sep 2026 19:15:00 +0000
+
+yfinance-ta-patterns (0.3.36-1) unstable; urgency=medium
+
+  * Release v0.3.36: Bug fixes, strict JSON compliance, tester isolation, and CLI markdown.
+
+ -- eminsk <M_N_N@tut.by>  Sat, 26 Sep 2026 18:00:00 +0000
+
+yfinance-ta-patterns (0.3.35-1) unstable; urgency=medium
+
+  * Initial Debian/Ubuntu release.
+
+ -- eminsk <M_N_N@tut.by>  Sun, 20 Sep 2026 12:00:00 +0000

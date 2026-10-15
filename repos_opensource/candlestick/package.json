@@ -1,0 +1,93 @@
+{
+  "name": "candlestick",
+  "version": "3.0.0",
+  "description": "JavaScript library for candlestick patterns detection.",
+  "homepage": "https://github.com/cm45t3r/candlestick",
+  "author": {
+    "name": "cm45t3r",
+    "url": "https://github.com/cm45t3r"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cm45t3r/candlestick.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cm45t3r/candlestick/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "candlestick",
+    "candlestick-patterns",
+    "pattern-detection",
+    "pattern-recognition",
+    "ohlc",
+    "ohlcv",
+    "technical-analysis",
+    "technical-indicators",
+    "algorithmic-trading",
+    "backtesting",
+    "market-data",
+    "trading",
+    "stocks",
+    "forex",
+    "crypto"
+  ],
+  "files": [
+    "src/",
+    "types/",
+    "cli/",
+    "!cli/test-data.*",
+    "bin/",
+    "CHANGELOG.md",
+    "index.js",
+    "LICENSE",
+    "package-lock.json",
+    "package.json",
+    "README.md"
+  ],
+  "bin": {
+    "candlestick": "bin/candlestick"
+  },
+  "exports": {
+    ".": {
+      "import": "./src/index.mjs",
+      "require": "./index.js",
+      "types": "./types/index.d.ts"
+    },
+    "./cli": {
+      "node": "./cli/index.js"
+    }
+  },
+  "main": "index.js",
+  "module": "src/index.mjs",
+  "types": "types/index.d.ts",
+  "sideEffects": false,
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/cm45t3r"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "coverage": "c8 --reporter=text --reporter=lcov npm test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "bench": "node benchmark.js",
+    "bench:readme": "node scripts/update-bench.js",
+    "prepublishOnly": "npm run lint && npm test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/js": "^10.0.1",
+    "c8": "^12.0.0",
+    "eslint": "^10.4.1",
+    "eslint-config-prettier": "^10.1.8",
+    "fast-check": "^4.8.0",
+    "prettier": "^3.8.3"
+  }
+}

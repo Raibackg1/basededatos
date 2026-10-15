@@ -1,0 +1,14 @@
+{
+ "ok": true,
+ "hallazgos": [
+  {
+   "tabla": "tokens",
+   "feature": "total_supply",
+   "bin": "Q1 [1e+09-1e+09]",
+   "n": 240,
+   "winrate": 13.33,
+   "base": 9.83,
+   "lift": 1.36
+  }
+ ]
+}

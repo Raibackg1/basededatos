@@ -1,0 +1,194 @@
+const { describe, it } = require("node:test");
+const assert = require("node:assert/strict");
+const utils = require("../src/utils.js");
+
+describe("utils", () => {
+  it("bodyLen: returns absolute body length", () => {
+    assert.equal(utils.bodyLen({ open: 10, close: 15 }), 5);
+    assert.equal(utils.bodyLen({ open: 15, close: 10 }), 5);
+  });
+  it("wickLen: returns correct upper shadow", () => {
+    assert.equal(utils.wickLen({ open: 10, high: 20, close: 15 }), 5);
+    assert.equal(utils.wickLen({ open: 20, high: 25, close: 15 }), 5);
+  });
+  it("tailLen: returns correct lower shadow", () => {
+    assert.equal(utils.tailLen({ open: 10, low: 5, close: 15 }), 5);
+    assert.equal(utils.tailLen({ open: 20, low: 10, close: 15 }), 5);
+  });
+  it("bodyEnds: returns correct top and bottom", () => {
+    assert.deepStrictEqual(utils.bodyEnds({ open: 10, close: 15 }), {
+      bottom: 10,
+      top: 15,
+    });
+    assert.deepStrictEqual(utils.bodyEnds({ open: 15, close: 10 }), {
+      bottom: 10,
+      top: 15,
+    });
+  });
+  it("isBullish: detects bullish candle", () => {
+    assert.equal(utils.isBullish({ open: 10, close: 15 }), true);
+    assert.equal(utils.isBullish({ open: 15, close: 10 }), false);
+  });
+  it("isBearish: detects bearish candle", () => {
+    assert.equal(utils.isBearish({ open: 10, close: 15 }), false);
+    assert.equal(utils.isBearish({ open: 15, close: 10 }), true);
+  });
+  it("hasGapUp: detects upward gap", () => {
+    const prev = { open: 10, close: 15 };
+    const curr = { open: 20, close: 25 };
+    assert.equal(utils.hasGapUp(prev, curr), true);
+    const curr2 = { open: 14, close: 16 };
+    assert.equal(utils.hasGapUp(prev, curr2), false);
+  });
+  it("hasGapDown: detects downward gap", () => {
+    const prev = { open: 20, close: 25 };
+    const curr = { open: 10, close: 15 };
+    assert.equal(utils.hasGapDown(prev, curr), true);
+    const curr2 = { open: 19, close: 21 };
+    assert.equal(utils.hasGapDown(prev, curr2), false);
+  });
+  it("findPattern: finds pattern indices", () => {
+    const arr = [
+      { open: 10, close: 15 },
+      { open: 15, close: 10 },
+      { open: 10, close: 15 },
+      { open: 15, close: 10 },
+    ];
+    // Find bullish candles
+    const indices = utils.findPattern(arr, utils.isBullish);
+    assert.deepStrictEqual(indices, [0, 2]);
+  });
+  it("bodyLen: returns 0 for open == close (doji)", () => {
+    assert.equal(utils.bodyLen({ open: 10, close: 10 }), 0);
+  });
+  it("wickLen: returns 0 for high == open == close", () => {
+    assert.equal(utils.wickLen({ open: 10, high: 10, close: 10 }), 0);
+  });
+  it("tailLen: returns 0 for low == open == close", () => {
+    assert.equal(utils.tailLen({ open: 10, low: 10, close: 10 }), 0);
+  });
+  it("handles negative and extreme values", () => {
+    assert.equal(utils.bodyLen({ open: -100, close: 100 }), 200);
+    assert.equal(utils.wickLen({ open: -100, high: 200, close: 100 }), 100);
+    assert.equal(utils.tailLen({ open: -100, low: -200, close: 100 }), 100);
+  });
+});
+
+describe("ensurePrecomputed", () => {
+  const raw = { open: 100, high: 110, low: 90, close: 95 };
+
+  it("precomputes raw candles that lack bodyLen", () => {
+    const result = utils.ensurePrecomputed([raw]);
+    assert.equal(typeof result[0].bodyLen, "number");
+    assert.equal(result[0].bodyLen, Math.abs(raw.open - raw.close));
+  });
+
+  it("returns already-enriched candles as-is (no redundant recompute)", () => {
+    const enriched = utils.precomputeCandleProps([raw]);
+    const result = utils.ensurePrecomputed(enriched);
+    assert.strictEqual(result, enriched);
+  });
+
+  it("failure mode A: candle with bodyLen as a non-numeric string triggers recompute", () => {
+    const withStringBodyLen = [{ ...raw, bodyLen: "0.05" }];
+    const result = utils.ensurePrecomputed(withStringBodyLen);
+    assert.equal(result[0].bodyLen, Math.abs(raw.open - raw.close));
+  });
+
+  it("failure mode A: candle with bodyLen: null triggers recompute", () => {
+    const withNullBodyLen = [{ ...raw, bodyLen: null }];
+    const result = utils.ensurePrecomputed(withNullBodyLen);
+    assert.equal(result[0].bodyLen, Math.abs(raw.open - raw.close));
+  });
+
+  it("returns empty array unchanged", () => {
+    const result = utils.ensurePrecomputed([]);
+    assert.deepStrictEqual(result, []);
+  });
+});
+
+describe("findPattern paramCount", () => {
+  const candles = [
+    { open: 90, high: 100, low: 80, close: 95 },
+    { open: 95, high: 105, low: 85, close: 90 },
+    { open: 90, high: 102, low: 82, close: 98 },
+    { open: 98, high: 108, low: 88, close: 93 },
+  ];
+
+  it("two-arg call: uses callback.length as before (no regression)", () => {
+    const indices = utils.findPattern(candles, utils.isBullish);
+    assert.deepStrictEqual(indices, [0, 2]);
+  });
+
+  it("explicit paramCount=1 matches two-arg form", () => {
+    const withExplicit = utils.findPattern(candles, utils.isBullish, 1);
+    const withDefault = utils.findPattern(candles, utils.isBullish);
+    assert.deepStrictEqual(withExplicit, withDefault);
+  });
+
+  it("plugin with default param: callback.length under-counts without explicit paramCount", () => {
+    // isBullishThenBearish has .length === 1 due to the default param
+    function isBullishThenBearish(prev, curr = {}) {
+      return prev.close > prev.open && curr.open > curr.close;
+    }
+    assert.equal(isBullishThenBearish.length, 1);
+
+    // Without explicit paramCount: passes only 1 candle → curr is always {} → 0 matches
+    const wrong = utils.findPattern(candles, isBullishThenBearish);
+    assert.equal(wrong.length, 0);
+
+    // With explicit paramCount=2: passes 2 candles → correct matches
+    const correct = utils.findPattern(candles, isBullishThenBearish, 2);
+    assert.ok(correct.length > 0);
+  });
+
+  it("plugin with rest params: callback.length under-counts without explicit paramCount", () => {
+    function threeCandles(...args) {
+      return args.length === 3 && args[0].close < args[2].close;
+    }
+    assert.equal(threeCandles.length, 0);
+
+    const wrong = utils.findPattern(candles, threeCandles);
+    assert.equal(wrong.length, 0);
+
+    const correct = utils.findPattern(candles, threeCandles, 3);
+    assert.ok(Array.isArray(correct));
+  });
+});
+
+describe("precomputeCandleProps strict mode", () => {
+  const valid = { open: 100, high: 110, low: 90, close: 95 };
+  const ocOnly = { open: 100, close: 95 }; // missing high/low → NaN wickLen/tailLen
+
+  it("default (strict=false): silently stores NaN for O/C-only candles", () => {
+    const [result] = utils.precomputeCandleProps([ocOnly]);
+    assert.ok(isNaN(result.wickLen));
+    assert.ok(isNaN(result.tailLen));
+  });
+
+  it("strict=true: throws for O/C-only candles", () => {
+    assert.throws(
+      () => utils.precomputeCandleProps([ocOnly], true),
+      /Invalid candle data produces NaN geometry/,
+    );
+  });
+
+  it("strict=true: throws for candle with undefined close", () => {
+    assert.throws(
+      () =>
+        utils.precomputeCandleProps([{ open: 100, high: 110, low: 90 }], true),
+      /Invalid candle data produces NaN geometry/,
+    );
+  });
+
+  it("strict=true: passes for fully valid candle", () => {
+    assert.doesNotThrow(() => utils.precomputeCandleProps([valid], true));
+  });
+
+  it("ensurePrecomputed strict=true: throws for O/C-only candles", () => {
+    assert.throws(
+      () => utils.ensurePrecomputed([ocOnly], true),
+      /Invalid candle data produces NaN geometry/,
+    );
+  });
+});

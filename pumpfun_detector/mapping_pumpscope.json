@@ -1,0 +1,38 @@
+{
+  "tables": {
+    "tokens": "Token",
+    "my_trades": "PaperPosition",
+    "ohlcv": "Snapshot"
+  },
+  "columns": {
+    "tokens": {
+      "token_id": "id",
+      "token_name": "name",
+      "token_symbol": "symbol",
+      "created_at": "createdAtChain",
+      "dev_wallet": "creator",
+      "graduated": "complete",
+      "market_cap": "marketCap",
+      "twitter": "twitter",
+      "telegram": "telegram",
+      "website": "website"
+    },
+    "my_trades": {
+      "token_id": "tokenId",
+      "entry_time": "entryTs",
+      "entry_price": "entryPrice",
+      "exit_time": "exitTs",
+      "exit_price": "exitPrice",
+      "size_sol": "betUsd",
+      "pnl_sol": "pnlUsd",
+      "pnl_pct": "pnlPct",
+      "status": "status",
+      "exit_reason": "reason"
+    },
+    "ohlcv": {
+      "token_id": "tokenId",
+      "ts": "ts",
+      "close": "priceUsd"
+    }
+  }
+}

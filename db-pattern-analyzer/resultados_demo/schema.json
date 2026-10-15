@@ -1,0 +1,164 @@
+{
+ "tables": {
+  "tokens": {
+   "columns": [
+    {
+     "name": "mint",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "name",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "symbol",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "created_at",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "dev_wallet",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "twitter",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "telegram",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "website",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "total_supply",
+     "type": "INTEGER",
+     "pk": 0
+    },
+    {
+     "name": "complete",
+     "type": "INTEGER",
+     "pk": 0
+    }
+   ],
+   "fks": [],
+   "indexes": [],
+   "rows": 1200
+  },
+  "trades": {
+   "columns": [
+    {
+     "name": "token_mint",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "wallet",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "side",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "sol_amount",
+     "type": "REAL",
+     "pk": 0
+    },
+    {
+     "name": "token_amount",
+     "type": "REAL",
+     "pk": 0
+    },
+    {
+     "name": "price",
+     "type": "REAL",
+     "pk": 0
+    },
+    {
+     "name": "block_time",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "tx_signature",
+     "type": "TEXT",
+     "pk": 0
+    }
+   ],
+   "fks": [],
+   "indexes": [],
+   "rows": 135265
+  },
+  "my_trades": {
+   "columns": [
+    {
+     "name": "token_mint",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "entry_time",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "entry_price",
+     "type": "REAL",
+     "pk": 0
+    },
+    {
+     "name": "exit_time",
+     "type": "TEXT",
+     "pk": 0
+    },
+    {
+     "name": "exit_price",
+     "type": "REAL",
+     "pk": 0
+    },
+    {
+     "name": "size_sol",
+     "type": "REAL",
+     "pk": 0
+    },
+    {
+     "name": "pnl_sol",
+     "type": "REAL",
+     "pk": 0
+    },
+    {
+     "name": "pnl_pct",
+     "type": "REAL",
+     "pk": 0
+    },
+    {
+     "name": "status",
+     "type": "TEXT",
+     "pk": 0
+    }
+   ],
+   "fks": [],
+   "indexes": [],
+   "rows": 441
+  }
+ },
+ "pragma": {
+  "page_count": 7220,
+  "freelist_count": 0
+ }
+}

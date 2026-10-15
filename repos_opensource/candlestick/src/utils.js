@@ -1,0 +1,259 @@
+// utils.js
+// Utility functions extracted from candlestick.js
+
+/**
+ * Absolute distance between `open` and `close`.
+ * @param {Object} candlestick - { open, close }
+ * @return {number}
+ */
+function bodyLen(candlestick) {
+  return Math.abs(candlestick.open - candlestick.close);
+}
+
+/**
+ * Absolute distance between `open` and `high` on bearish candles or `close` and `high` on bullish candles.
+ * @param {Object} candlestick - { open, high, close }
+ * @return {number}
+ */
+function wickLen(candlestick) {
+  return candlestick.high - Math.max(candlestick.open, candlestick.close);
+}
+
+/**
+ * Absolute distance between `low` and `open` on bullish candles or `low` and `close` on bearish candles.
+ * @param {Object} candlestick - { open, low, close }
+ * @return {number}
+ */
+function tailLen(candlestick) {
+  return Math.min(candlestick.open, candlestick.close) - candlestick.low;
+}
+
+/**
+ * Returns `top` and `bottom` ends from a body.
+ * @param {Object} candlestick - { open, close }
+ * @return {Object} { bottom, top }
+ */
+function bodyEnds(candlestick) {
+  return candlestick.open <= candlestick.close
+    ? { bottom: candlestick.open, top: candlestick.close }
+    : { bottom: candlestick.close, top: candlestick.open };
+}
+
+/**
+ * Returns `true` if `close` is greater than `open` (bullish candle).
+ * @param {Object} candlestick - { open, close }
+ * @return {boolean}
+ */
+function isBullish(candlestick) {
+  return candlestick.open < candlestick.close;
+}
+
+/**
+ * Returns `true` if `close` is less than `open` (bearish candle).
+ * @param {Object} candlestick - { open, close }
+ * @return {boolean}
+ */
+function isBearish(candlestick) {
+  return candlestick.open > candlestick.close;
+}
+
+/**
+ * Returns `true` if previous top is less than current bottom (gap up).
+ * @param {Object} previous - { open, close }
+ * @param {Object} current - { open, close }
+ * @return {boolean}
+ */
+function hasGapUp(previous, current) {
+  return bodyEnds(previous).top < bodyEnds(current).bottom;
+}
+
+/**
+ * Returns `true` if previous bottom is greater than current top (gap down).
+ * @param {Object} previous - { open, close }
+ * @param {Object} current - { open, close }
+ * @return {boolean}
+ */
+function hasGapDown(previous, current) {
+  return bodyEnds(previous).bottom > bodyEnds(current).top;
+}
+
+/**
+ * Returns `true` if previous top is less or equal than current and bottom is greater or equal (engulfed body).
+ * @param {Object} previous - { open, close }
+ * @param {Object} current - { open, close }
+ * @return {boolean}
+ */
+function isEngulfed(previous, current) {
+  return (
+    bodyEnds(previous).top <= bodyEnds(current).top &&
+    bodyEnds(previous).bottom >= bodyEnds(current).bottom
+  );
+}
+
+/**
+ * Generalized pattern search utility for arrays.
+ * @param {Array} dataArray - Array of candlesticks
+ * @param {Function} callback - Pattern function
+ * @return {Array<number>} Indices where the pattern is found
+ */
+function findPattern(dataArray, callback, paramCount = callback.length) {
+  const upperBound = dataArray.length - paramCount;
+  const results = [];
+  for (let i = 0; i <= upperBound; i++) {
+    const values = [];
+    for (let j = 0; j < paramCount; j++) {
+      values.push(dataArray[i + j]);
+    }
+    if (callback(...values)) {
+      results.push(i);
+    }
+  }
+  return results;
+}
+
+/**
+ * Precompute and cache all relevant properties for each candle in a series.
+ * Returns a new array of candle objects with extra fields: bodyLen, wickLen, tailLen, isBullish, isBearish, bodyEnds.
+ * @param {Array<Object>} dataArray
+ * @return {Array<Object>} Array of candles with cached properties
+ */
+function precomputeCandleProps(dataArray, strict = false) {
+  return dataArray.map((candle) => {
+    const bl = bodyLen(candle);
+    const wl = wickLen(candle);
+    const tl = tailLen(candle);
+    if (
+      strict &&
+      (!Number.isFinite(bl) || !Number.isFinite(wl) || !Number.isFinite(tl))
+    ) {
+      throw new Error(
+        `Invalid candle data produces NaN geometry: ${JSON.stringify(candle)}`,
+      );
+    }
+    return {
+      ...candle,
+      bodyLen: bl,
+      wickLen: wl,
+      tailLen: tl,
+      isBullish: isBullish(candle),
+      isBearish: isBearish(candle),
+      bodyEnds: bodyEnds(candle),
+    };
+  });
+}
+
+function ensurePrecomputed(dataArray, strict = false) {
+  return dataArray.length > 0 && typeof dataArray[0].bodyLen === "number"
+    ? dataArray
+    : precomputeCandleProps(dataArray, strict);
+}
+
+/**
+ * Validate OHLC data structure and relationships.
+ * @param {any} candle - Candlestick data to validate
+ * @param {boolean} throwError - Whether to throw an error on validation failure (default: true)
+ * @return {boolean} True if valid, false otherwise
+ */
+function validateOHLC(candle, throwError = true) {
+  const errors = [];
+
+  // Check if candle is an object
+  if (!candle || typeof candle !== "object") {
+    errors.push("Candle must be an object");
+  } else {
+    // Check required fields
+    const requiredFields = ["open", "high", "low", "close"];
+    for (const field of requiredFields) {
+      if (!(field in candle)) {
+        errors.push(`Missing required field: ${field}`);
+      } else if (typeof candle[field] !== "number") {
+        errors.push(
+          `Field ${field} must be a number, got ${typeof candle[field]}`,
+        );
+      } else if (!Number.isFinite(candle[field])) {
+        errors.push(`Field ${field} must be a finite number`);
+      }
+    }
+
+    // Check OHLC relationships if all fields are present and valid
+    if (errors.length === 0) {
+      if (candle.high < candle.low) {
+        errors.push(`High (${candle.high}) must be >= Low (${candle.low})`);
+      }
+      if (candle.high < candle.open) {
+        errors.push(`High (${candle.high}) must be >= Open (${candle.open})`);
+      }
+      if (candle.high < candle.close) {
+        errors.push(`High (${candle.high}) must be >= Close (${candle.close})`);
+      }
+      if (candle.low > candle.open) {
+        errors.push(`Low (${candle.low}) must be <= Open (${candle.open})`);
+      }
+      if (candle.low > candle.close) {
+        errors.push(`Low (${candle.low}) must be <= Close (${candle.close})`);
+      }
+    }
+  }
+
+  if (errors.length > 0 && throwError) {
+    throw new Error(`Invalid OHLC data: ${errors.join(", ")}`);
+  }
+
+  return errors.length === 0;
+}
+
+/**
+ * Validate an array of OHLC data.
+ * @param {any[]} dataArray - Array of candlestick data to validate
+ * @param {boolean} throwError - Whether to throw an error on validation failure (default: true)
+ * @return {boolean} True if all candles are valid, false otherwise
+ */
+function validateOHLCArray(dataArray, throwError = true) {
+  if (!Array.isArray(dataArray)) {
+    if (throwError) {
+      throw new Error("Data must be an array");
+    }
+    return false;
+  }
+
+  if (dataArray.length === 0) {
+    if (throwError) {
+      throw new Error("Data array cannot be empty");
+    }
+    return false;
+  }
+
+  for (let i = 0; i < dataArray.length; i++) {
+    try {
+      if (!validateOHLC(dataArray[i], throwError)) {
+        return false;
+      }
+    } catch (error) {
+      if (throwError) {
+        throw new Error(`Invalid candle at index ${i}: ${error.message}`, {
+          cause: error,
+        });
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
+
+module.exports = {
+  bodyLen,
+  wickLen,
+  tailLen,
+  bodyEnds,
+  isBullish,
+  isBearish,
+  hasGapUp,
+  hasGapDown,
+  findPattern,
+  isEngulfed,
+  precomputeCandleProps,
+  ensurePrecomputed,
+  validateOHLC,
+  validateOHLCArray,
+};

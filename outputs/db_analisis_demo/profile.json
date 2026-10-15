@@ -1,0 +1,618 @@
+{
+ "profile": {
+  "tokens": {
+   "rows": 1200,
+   "cols": {
+    "mint": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 1200,
+     "top5": [
+      [
+       "ztW63L7qZ9vZCZyKhsLwD9Zr3VqgZ9Lov1UoWprNLBWt",
+       1
+      ],
+      [
+       "zt25JNkiQtkCofrGTVvvnMEV9XA6VJ6Lp2Gzq87RuEGz",
+       1
+      ],
+      [
+       "zsSXVGYgJR8UyQ22Qkwsr8btkEgqSCogyaXKHjp2V6CE",
+       1
+      ],
+      [
+       "zjfVMs5TtMHqubP6RA5taR6bNb8c1yKpXG3ucPst4Erv",
+       1
+      ],
+      [
+       "zibXHoJzUs3mgN9bLMZxJ5FiZA2UQ4TTGUyRwfy9tKRK",
+       1
+      ]
+     ],
+     "flags": [
+      "CANDIDATA INDICE/FK"
+     ]
+    },
+    "name": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 1027,
+     "top5": [
+      [
+       "Hyper Coin AI",
+       4
+      ],
+      [
+       "Silent Trump",
+       3
+      ],
+      [
+       "Silent Robot X",
+       3
+      ],
+      [
+       "Silent Robot Fi",
+       3
+      ],
+      [
+       "Silent Pepe SOL",
+       3
+      ]
+     ],
+     "flags": []
+    },
+    "symbol": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 1065,
+     "top5": [
+      [
+       "SICHAIN",
+       4
+      ],
+      [
+       "SIROBX",
+       3
+      ],
+      [
+       "SIROB",
+       3
+      ],
+      [
+       "SIPEPSO",
+       3
+      ],
+      [
+       "SIGPT",
+       3
+      ]
+     ],
+     "flags": []
+    },
+    "created_at": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 1200,
+     "top5": [
+      [
+       "2026-10-12T23:43:13.773524523+00:00",
+       1
+      ],
+      [
+       "2026-10-12T23:13:56.122523069+00:00",
+       1
+      ],
+      [
+       "2026-10-12T22:38:38.332361460+00:00",
+       1
+      ],
+      [
+       "2026-10-12T22:19:24.462224483+00:00",
+       1
+      ],
+      [
+       "2026-10-12T20:10:36.426013708+00:00",
+       1
+      ]
+     ],
+     "flags": []
+    },
+    "dev_wallet": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 1200,
+     "top5": [
+      [
+       "zzWAqXxQLQSrazTht2oRPxeXTD68UCp6ApmgRdimyTjn",
+       1
+      ],
+      [
+       "zvs7RQtPfJrYJXXoAy6o4iWCYDy136hnS4tGHPBAYLYF",
+       1
+      ],
+      [
+       "zrJnuqg3hzMbKbJcRGiJXsubqxFDFa7bH31dSPNRbBzb",
+       1
+      ],
+      [
+       "zoegvB2xFVRjvGJ7V4C4Kyv5A9VuD12qonNuNeFFzzGm",
+       1
+      ],
+      [
+       "zmxHtW1UzcBwyGec3W7x1DHeE6wYCxwi922zaYhaawza",
+       1
+      ]
+     ],
+     "flags": []
+    },
+    "twitter": {
+     "type": "TEXT",
+     "null_pct": 43.58,
+     "distinct": 636,
+     "top5": [
+      [
+       "https://x.com/sigpt",
+       3
+      ],
+      [
+       "https://x.com/sichain",
+       3
+      ],
+      [
+       "https://x.com/metru",
+       3
+      ],
+      [
+       "https://x.com/hyage",
+       3
+      ],
+      [
+       "https://x.com/tuinuso",
+       2
+      ]
+     ],
+     "flags": [
+      "NULOS ALTOS 43.58%"
+     ]
+    },
+    "telegram": {
+     "type": "TEXT",
+     "null_pct": 67.25,
+     "distinct": 380,
+     "top5": [
+      [
+       "https://t.me/sichain",
+       3
+      ],
+      [
+       "https://t.me/sidogai",
+       2
+      ],
+      [
+       "https://t.me/sibul2.",
+       2
+      ],
+      [
+       "https://t.me/sibeain",
+       2
+      ],
+      [
+       "https://t.me/mogpt2.",
+       2
+      ]
+     ],
+     "flags": [
+      "NULOS ALTOS 67.25%"
+     ]
+    },
+    "website": {
+     "type": "TEXT",
+     "null_pct": 55.58,
+     "distinct": 512,
+     "top5": [
+      [
+       "https://tusolma.fun",
+       2
+      ],
+      [
+       "https://sninu2..fun",
+       2
+      ],
+      [
+       "https://snape.fun",
+       2
+      ],
+      [
+       "https://sifroma.fun",
+       2
+      ],
+      [
+       "https://sichain.fun",
+       2
+      ]
+     ],
+     "flags": [
+      "NULOS ALTOS 55.58%"
+     ]
+    },
+    "total_supply": {
+     "type": "INTEGER",
+     "null_pct": 0.0,
+     "distinct": 1,
+     "min": 1000000000,
+     "max": 1000000000,
+     "avg": 1000000000.0,
+     "flags": [
+      "CONSTANTE"
+     ]
+    },
+    "complete": {
+     "type": "INTEGER",
+     "null_pct": 0.0,
+     "distinct": 2,
+     "min": 0,
+     "max": 1,
+     "avg": 0.09833333333333333,
+     "flags": []
+    }
+   },
+   "pk": [],
+   "salud": [
+    "SIN PK",
+    "SIN INDICES",
+    "SIN FK DECLARADA"
+   ]
+  },
+  "trades": {
+   "rows": 135265,
+   "cols": {
+    "token_mint": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 1200,
+     "top5": [
+      [
+       "EqjSPKtUwnsSkzSyXSzaPSd1wX5kFNh3G8FwHdaE9wsy",
+       262
+      ],
+      [
+       "VAZ3QmWok2cXRfVPJnbR8B9E3Nq4zN2NFT3FjNxMTAUN",
+       259
+      ],
+      [
+       "mjMtPKGzwcE88o6boHM13Nt6MzYbXekezHcbQFaHQYc1",
+       257
+      ],
+      [
+       "qgzEPT54jmuCnJHAMuJk5bSeVe55FfRxVQGa6FYwusB6",
+       256
+      ],
+      [
+       "h8w3EzjVztSSNWCnSbttsLRWYD4PEph1r61ZBN757Yhi",
+       256
+      ]
+     ],
+     "flags": [
+      "CANDIDATA INDICE/FK"
+     ]
+    },
+    "wallet": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 50536,
+     "top5": [
+      [
+       "R7LEahj3HrwRxwdMitc4QfZAGYC6zc5MLncvS2QG5sBh",
+       48
+      ],
+      [
+       "E97reK8ZfXK5z3wyAzBPk2ZoSJyLqCBHh4meUc19NmDR",
+       44
+      ],
+      [
+       "hbWDHQyBuedJ8gXzusCyMV9EL9DTPqJ7vvAy4y5u9xvz",
+       42
+      ],
+      [
+       "R4zi2ZWtaXNXKcStJZJ6XaAZkgCc8nPiApgHZjhQafJW",
+       37
+      ],
+      [
+       "CHwyh2DJHERXEh86JsGS96ShKwc4kkoN6fNxXVcCSCsJ",
+       36
+      ]
+     ],
+     "flags": [
+      "CANDIDATA INDICE/FK"
+     ]
+    },
+    "side": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 2,
+     "top5": [
+      [
+       "buy",
+       83987
+      ],
+      [
+       "sell",
+       51278
+      ]
+     ],
+     "flags": [
+      "ENUM IMPLICITO->lookup"
+     ]
+    },
+    "sol_amount": {
+     "type": "REAL",
+     "null_pct": 0.0,
+     "distinct": 122984,
+     "min": 0.016,
+     "max": 8.0,
+     "avg": 0.518956854507818,
+     "flags": [
+      "DINERO REAL->INTEGER"
+     ]
+    },
+    "token_amount": {
+     "type": "REAL",
+     "null_pct": 0.0,
+     "distinct": 134524,
+     "min": 201.39,
+     "max": 9898208.16,
+     "avg": 84901.47764366244,
+     "flags": [
+      "DINERO REAL->INTEGER"
+     ]
+    },
+    "price": {
+     "type": "REAL",
+     "null_pct": 0.0,
+     "distinct": 135265,
+     "min": 1.6431784000526355e-07,
+     "max": 0.00018290704239406192,
+     "avg": 8.314721771453728e-06,
+     "flags": [
+      "DINERO REAL->INTEGER"
+     ]
+    },
+    "block_time": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 135265,
+     "top5": [
+      [
+       "2026-10-12T23:47:18.258653641+00:00",
+       1
+      ],
+      [
+       "2026-10-12T23:47:08.119193077+00:00",
+       1
+      ],
+      [
+       "2026-10-12T23:46:58.757033110+00:00",
+       1
+      ],
+      [
+       "2026-10-12T23:46:56.140816689+00:00",
+       1
+      ],
+      [
+       "2026-10-12T23:46:54.682972670+00:00",
+       1
+      ]
+     ],
+     "flags": [
+      "FECHA COMO TEXTO->epoch"
+     ]
+    },
+    "tx_signature": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 135265,
+     "top5": [
+      [
+       "0262rmiykdq7DH7dC8VCSwRBRYwdwhq1ok89cgxdLbgG",
+       1
+      ],
+      [
+       "0261sQCRmtowkMmtuo2Ms6HvT6fquD4PKkw3sJ9K3pJJ",
+       1
+      ],
+      [
+       "0260HYsWBpBc31GhH3mS6R9uCwxtv4WnpJonUitbhGWR",
+       1
+      ],
+      [
+       "0259pHB3m27qFPCmr3fbawyG1s7CP5YGi6xnnoHkWPbZ",
+       1
+      ],
+      [
+       "0259ZHcLXq3Yv1eLwEXAeb2fuEAmFSmJz5YDJoX3HmT2",
+       1
+      ]
+     ],
+     "flags": []
+    }
+   },
+   "pk": [],
+   "salud": [
+    "SIN PK",
+    "SIN INDICES",
+    "SIN FK DECLARADA"
+   ]
+  },
+  "my_trades": {
+   "rows": 441,
+   "cols": {
+    "token_mint": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 441,
+     "top5": [
+      [
+       "zsSXVGYgJR8UyQ22Qkwsr8btkEgqSCogyaXKHjp2V6CE",
+       1
+      ],
+      [
+       "zjfVMs5TtMHqubP6RA5taR6bNb8c1yKpXG3ucPst4Erv",
+       1
+      ],
+      [
+       "zibXHoJzUs3mgN9bLMZxJ5FiZA2UQ4TTGUyRwfy9tKRK",
+       1
+      ],
+      [
+       "zgjs5YcFp9Y2vwu1uv3QDwroS5B5aDNXbhpDP4ov4gry",
+       1
+      ],
+      [
+       "zdYgXxqo8SG2yrmNV7RUyxErfM6GrG2n8SJUA6EXmpf3",
+       1
+      ]
+     ],
+     "flags": [
+      "CANDIDATA INDICE/FK"
+     ]
+    },
+    "entry_time": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 441,
+     "top5": [
+      [
+       "2026-10-12T19:59:21.583778381+00:00",
+       1
+      ],
+      [
+       "2026-10-12T18:42:41.854897738+00:00",
+       1
+      ],
+      [
+       "2026-10-12T18:38:55.855252266+00:00",
+       1
+      ],
+      [
+       "2026-10-12T16:39:54.756331921+00:00",
+       1
+      ],
+      [
+       "2026-10-12T12:55:04.278789520+00:00",
+       1
+      ]
+     ],
+     "flags": [
+      "FECHA COMO TEXTO->epoch"
+     ]
+    },
+    "entry_price": {
+     "type": "REAL",
+     "null_pct": 0.0,
+     "distinct": 441,
+     "min": 1.6447576644108001e-07,
+     "max": 2.3039732066761937e-05,
+     "avg": 5.441970742658351e-06,
+     "flags": [
+      "DINERO REAL->INTEGER"
+     ]
+    },
+    "exit_time": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 441,
+     "top5": [
+      [
+       "2026-10-12T20:04:35.307210445+00:00",
+       1
+      ],
+      [
+       "2026-10-12T18:42:43.830579519+00:00",
+       1
+      ],
+      [
+       "2026-10-12T18:38:55.855252266+00:00",
+       1
+      ],
+      [
+       "2026-10-12T16:42:11.279726744+00:00",
+       1
+      ],
+      [
+       "2026-10-12T12:55:45.134304523+00:00",
+       1
+      ]
+     ],
+     "flags": [
+      "FECHA COMO TEXTO->epoch"
+     ]
+    },
+    "exit_price": {
+     "type": "REAL",
+     "null_pct": 0.0,
+     "distinct": 441,
+     "min": 1.6431784000526355e-07,
+     "max": 2.3490551886009173e-05,
+     "avg": 6.580176557814409e-06,
+     "flags": [
+      "DINERO REAL->INTEGER"
+     ]
+    },
+    "size_sol": {
+     "type": "REAL",
+     "null_pct": 0.0,
+     "distinct": 427,
+     "min": 0.08,
+     "max": 1.9117,
+     "avg": 0.4991557823129252,
+     "flags": [
+      "DINERO REAL->INTEGER"
+     ]
+    },
+    "pnl_sol": {
+     "type": "REAL",
+     "null_pct": 0.0,
+     "distinct": 421,
+     "min": -0.6219,
+     "max": 2.3721,
+     "avg": 0.12230907029478458,
+     "flags": [
+      "DINERO REAL->INTEGER"
+     ]
+    },
+    "pnl_pct": {
+     "type": "REAL",
+     "null_pct": 0.0,
+     "distinct": 431,
+     "min": -78.46,
+     "max": 217.67,
+     "avg": 25.031904761904762,
+     "flags": [
+      "DINERO REAL->INTEGER"
+     ]
+    },
+    "status": {
+     "type": "TEXT",
+     "null_pct": 0.0,
+     "distinct": 1,
+     "top5": [
+      [
+       "closed",
+       441
+      ]
+     ],
+     "flags": [
+      "CONSTANTE"
+     ]
+    }
+   },
+   "pk": [],
+   "salud": [
+    "SIN PK",
+    "SIN INDICES",
+    "SIN FK DECLARADA"
+   ]
+  }
+ },
+ "orphans": []
+}

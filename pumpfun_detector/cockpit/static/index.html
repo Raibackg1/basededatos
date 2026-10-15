@@ -1,0 +1,2446 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pumpfun Quant Cockpit — Terminal IA & Detector de Patrones</title>
+<style>
+  :root {
+    --bg: #07090e;
+    --bg-card: #0c121d;
+    --bg-card-hover: #111a29;
+    --bg-panel: rgba(12, 18, 29, 0.95);
+    --border: #1a2538;
+    --border-bright: #2b3d5c;
+    --fg: #e2e8f0;
+    --dim: #7f8ea3;
+    --accent: #00e5ff;
+    --accent-glow: rgba(0, 229, 255, 0.25);
+    --neon-green: #00ffaa;
+    --neon-green-glow: rgba(0, 255, 170, 0.25);
+    --ok: #10b981;
+    --bad: #ff3366;
+    --bad-glow: rgba(255, 51, 102, 0.25);
+    --warn: #f59e0b;
+    --purple: #a855f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    width: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-size: 12px;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* TOP NAVIGATION BAR */
+  #top-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 48px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    z-index: 1000;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+  }
+  .brand-logo {
+    color: var(--neon-green);
+    font-size: 16px;
+    filter: drop-shadow(0 0 8px var(--neon-green-glow));
+  }
+  .brand-tag {
+    background: #142033;
+    color: var(--accent);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    border: 1px solid rgba(0, 229, 255, 0.3);
+  }
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--neon-green);
+    box-shadow: 0 0 10px var(--neon-green);
+    animation: livePulse 1.8s infinite ease-in-out;
+    display: inline-block;
+  }
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+
+  /* PRIMARY MODE TABS IN HEADER */
+  .nav-modes {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: #090e17;
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .nav-btn {
+    background: transparent;
+    color: var(--dim);
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .nav-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .nav-btn.active {
+    background: #142236;
+    color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(0, 229, 255, 0.35);
+  }
+
+  /* BOT STATUS & TICKERS IN HEADER */
+  .top-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .ticker-pill {
+    background: #0a101b;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: monospace;
+  }
+  .ticker-item {
+    display: flex;
+    gap: 4px;
+  }
+  .ticker-label { color: var(--dim); }
+  .ticker-val { font-weight: 700; color: #fff; }
+  .bot-toggle-btn {
+    background: rgba(0, 255, 170, 0.12);
+    border: 1px solid var(--neon-green);
+    color: var(--neon-green);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 11px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+  }
+  .bot-toggle-btn:hover {
+    background: var(--neon-green);
+    color: #05070a;
+    box-shadow: 0 0 14px var(--neon-green-glow);
+  }
+  .bot-toggle-btn.paused {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: var(--warn);
+    color: var(--warn);
+  }
+
+  /* VIEW CONTAINERS */
+  .view-container {
+    position: fixed;
+    top: 48px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow: hidden;
+    display: none;
+    z-index: 10;
+  }
+  .view-container.active {
+    display: flex;
+  }
+
+  /* =========================================================================
+     VIEW 1: RADAR ALFA & DETECTOR DE PATRONES IA (HERO DEFAULT)
+     ========================================================================= */
+  #view-radar {
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+    background: radial-gradient(circle at 10% 20%, rgba(0, 229, 255, 0.03) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(0, 255, 170, 0.03) 0%, transparent 40%),
+                var(--bg);
+  }
+
+  /* SUB-BAR / FILTER BAR */
+  .radar-subbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    gap: 12px;
+  }
+  .search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #070b12;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    flex: 1;
+    max-width: 380px;
+  }
+  .search-input {
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 11px;
+    outline: none;
+    width: 100%;
+  }
+  .filter-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .filter-chip {
+    background: #0f1726;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    padding: 4px 10px;
+    border-radius: 5px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .filter-chip:hover {
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .filter-chip.active {
+    background: #17263c;
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .kpi-banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 11px;
+  }
+  .kpi-stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* SPLIT VIEW (CARDS STREAM + DEEP-DIVE INSPECTOR) */
+  .radar-grid {
+    display: flex;
+    flex: 1;
+    gap: 12px;
+    min-height: 0;
+  }
+  .radar-stream {
+    flex: 1.5;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-right: 4px;
+  }
+  .radar-stream::-webkit-scrollbar { width: 6px; }
+  .radar-stream::-webkit-scrollbar-thumb { background: #1a2538; border-radius: 3px; }
+
+  /* TOKEN PATTERN CARD */
+  .token-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    cursor: pointer;
+  }
+  .token-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-bright);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  }
+  .token-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 16px rgba(0, 229, 255, 0.15);
+  }
+  .token-card.vetoed {
+    border-left: 4px solid var(--bad);
+    opacity: 0.85;
+  }
+  .token-card.bullish {
+    border-left: 4px solid var(--neon-green);
+  }
+
+  .card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .token-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .token-symbol {
+    font-size: 14px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: 0.03em;
+  }
+  .token-name {
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .token-ca {
+    font-family: monospace;
+    font-size: 10px;
+    color: var(--dim);
+    background: #090e17;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: copy;
+  }
+  .token-ca:hover { color: var(--accent); border-color: var(--accent); }
+
+  .card-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    background: #080d15;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #141c2b;
+  }
+  .cm-box { display: flex; flex-direction: column; }
+  .cm-label { font-size: 10px; color: var(--dim); margin-bottom: 2px; }
+  .cm-val { font-size: 12px; font-weight: 700; font-family: monospace; color: #fff; }
+
+  /* PATTERN BANNER */
+  .pattern-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .pattern-banner.bullish {
+    background: rgba(0, 255, 170, 0.08);
+    border: 1px solid rgba(0, 255, 170, 0.3);
+    color: var(--neon-green);
+  }
+  .pattern-banner.veto {
+    background: rgba(255, 51, 102, 0.08);
+    border: 1px solid rgba(255, 51, 102, 0.3);
+    color: var(--bad);
+  }
+  .pattern-banner.neutral {
+    background: rgba(127, 142, 163, 0.08);
+    border: 1px solid rgba(127, 142, 163, 0.3);
+    color: var(--dim);
+  }
+
+  .causal-trigger {
+    font-size: 10.5px;
+    color: #94a3b8;
+    line-height: 1.4;
+    background: #090e17;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border-left: 2px solid var(--accent);
+  }
+
+  /* SPARKLINE SVG */
+  .sparkline-wrap {
+    height: 38px;
+    width: 100%;
+    margin-top: 2px;
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid #141c2b;
+    padding-top: 8px;
+  }
+  .badges-row {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .smart-badge {
+    background: rgba(0, 229, 255, 0.12);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    color: var(--accent);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .shield-badge {
+    background: #090e17;
+    border: 1px solid #1b2638;
+    color: var(--dim);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: monospace;
+  }
+  .shield-badge.safe { color: var(--ok); }
+  .shield-badge.danger { color: var(--bad); }
+
+  .actions-row {
+    display: flex;
+    gap: 6px;
+  }
+  .btn-snipe {
+    background: linear-gradient(135deg, rgba(0, 255, 170, 0.25), rgba(0, 229, 255, 0.25));
+    border: 1px solid var(--neon-green);
+    color: #fff;
+    padding: 5px 12px;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-snipe:hover {
+    background: var(--neon-green);
+    color: #05070a;
+    box-shadow: 0 0 12px var(--neon-green-glow);
+  }
+
+  /* RIGHT PANEL: INSPECTOR & ORDER PAD */
+  .radar-inspector {
+    flex: 1;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .radar-inspector::-webkit-scrollbar { width: 5px; }
+  .radar-inspector::-webkit-scrollbar-thumb { background: #1a2538; border-radius: 3px; }
+
+  .insp-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+  }
+  .insp-title { font-size: 14px; font-weight: 800; color: #fff; }
+
+  .score-dial {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #080d15;
+    border: 1px solid #141c2b;
+    border-radius: 8px;
+    padding: 10px;
+  }
+  .score-circle {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 3px solid var(--neon-green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--neon-green);
+    box-shadow: 0 0 12px var(--neon-green-glow);
+  }
+
+  .exit-ladder {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #080d15;
+    border: 1px solid #141c2b;
+    border-radius: 6px;
+    padding: 10px;
+  }
+  .ladder-step {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    padding: 3px 0;
+  }
+  .ladder-label { color: var(--dim); }
+  .ladder-val { font-weight: 700; font-family: monospace; }
+
+  .order-pad {
+    background: #080d15;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .order-sizes {
+    display: flex;
+    gap: 6px;
+  }
+  .size-chip {
+    flex: 1;
+    background: #111a28;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    padding: 6px 0;
+    text-align: center;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .size-chip.active {
+    background: rgba(0, 229, 255, 0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .btn-submit-order {
+    background: linear-gradient(90deg, var(--neon-green), var(--accent));
+    color: #05070a;
+    border: none;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    margin-top: 4px;
+  }
+  .btn-submit-order:hover {
+    box-shadow: 0 0 16px var(--neon-green-glow);
+    filter: brightness(1.1);
+  }
+
+  /* =========================================================================
+     VIEW 2: SMART MONEY & KOLS LIVE
+     ========================================================================= */
+  #view-smartmoney {
+    flex-direction: column;
+    padding: 16px;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .table-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  table.pro-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11.5px;
+    text-align: left;
+  }
+  table.pro-table th {
+    background: #090e17;
+    color: var(--dim);
+    padding: 10px 14px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  table.pro-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #141c2a;
+    font-family: monospace;
+  }
+  table.pro-table tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  /* =========================================================================
+     VIEW 3: BOT AUTO-TRADER & POSICIONES PAPER
+     ========================================================================= */
+  #view-bot {
+    flex-direction: column;
+    padding: 16px;
+    gap: 14px;
+    overflow-y: auto;
+  }
+  .bot-hud-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+  }
+  .bot-hud-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .bot-hud-label { font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .bot-hud-val { font-size: 18px; font-weight: 800; font-family: monospace; }
+
+  /* POSITION EXIT PROGRESS BAR */
+  .exit-bar-wrap {
+    height: 8px;
+    background: #111a28;
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+    margin: 4px 0;
+  }
+  .exit-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--neon-green), var(--accent));
+    border-radius: 4px;
+  }
+  .btn-close-pos {
+    background: rgba(255, 51, 102, 0.15);
+    border: 1px solid var(--bad);
+    color: var(--bad);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-close-pos:hover {
+    background: var(--bad);
+    color: #fff;
+  }
+
+  /* =========================================================================
+     VIEW 4: VISOR 3D CAUSAL FORENSE (LEGACY COMPATIBLE)
+     ========================================================================= */
+  #view-3d {
+    position: relative;
+  }
+  #gl {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    display: block;
+  }
+  #left-panel-3d {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    width: 320px;
+    bottom: 50px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    z-index: 10;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #right-panel-3d {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 380px;
+    bottom: 50px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    z-index: 10;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #scene-controls {
+    position: absolute;
+    bottom: 12px;
+    left: 344px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 10;
+  }
+
+  /* TOOLTIP & TOAST */
+  #tooltip {
+    position: fixed;
+    background: rgba(10, 15, 24, 0.95);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 8px 12px;
+    pointer-events: none;
+    z-index: 9000;
+    display: none;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+    font-size: 11px;
+    min-width: 180px;
+  }
+  #toast {
+    position: fixed;
+    bottom: 16px;
+    right: 20px;
+    background: #0f172a;
+    border: 1px solid var(--accent);
+    color: var(--fg);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 11px;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7);
+    transform: translateY(100px);
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  #toast.show {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  /* =========================================================================
+     VIEW AI: COPILOT IA & TERMINAL DE AUTOMATIZACIÓN
+     ========================================================================= */
+  #view-ai {
+    flex-direction: row;
+    padding: 12px;
+    gap: 12px;
+    background: radial-gradient(circle at 80% 20%, rgba(168, 85, 247, 0.04) 0%, transparent 40%),
+                radial-gradient(circle at 20% 80%, rgba(0, 229, 255, 0.04) 0%, transparent 40%),
+                var(--bg);
+  }
+  .ai-terminal-panel {
+    flex: 1.4;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .ai-header {
+    padding: 10px 14px;
+    background: #090e17;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .ai-chat-stream {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ai-chat-msg {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 88%;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .ai-chat-msg.user {
+    align-self: flex-end;
+    background: #142033;
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    color: #e2e8f0;
+  }
+  .ai-chat-msg.bot {
+    align-self: flex-start;
+    background: #0d1522;
+    border: 1px solid #1a2538;
+    color: #f1f5f9;
+  }
+  .ai-chat-msg.bot pre {
+    background: #07090e;
+    padding: 8px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: monospace;
+    font-size: 11px;
+    margin: 6px 0;
+  }
+  .ai-prompt-bar {
+    padding: 10px;
+    background: #090e17;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+  }
+  .ai-input {
+    flex: 1;
+    background: #06090f;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--fg);
+    padding: 8px 12px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+  }
+  .ai-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+  .ai-chips-bar {
+    padding: 6px 12px;
+    background: #080d16;
+    border-top: 1px solid #141c2a;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+  }
+  .ai-side-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .ai-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ai-box-title {
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    letter-spacing: 0.03em;
+  }
+
+  /* UTILITIES */
+  .ok { color: var(--ok); }
+  .neon-green { color: var(--neon-green); }
+  .bad { color: var(--bad); }
+  .warn { color: var(--warn); }
+  .accent { color: var(--accent); }
+  .dim { color: var(--dim); }
+  button { font-family: inherit; }
+</style>
+</head>
+<body>
+
+<!-- TOP NAVIGATION BAR -->
+<header id="top-bar">
+  <div class="brand">
+    <span class="brand-logo">⚡</span>
+    <span>PUMPFUN COCKPIT</span>
+    <span class="brand-tag">TERMINAL IA QUANT</span>
+    <span class="live-dot" title="En vivo"></span>
+  </div>
+
+  <!-- MAIN MODE SWITCHER -->
+  <nav class="nav-modes">
+    <button class="nav-btn active" id="btn-mode-radar" onclick="switchMainMode('radar')">
+      <span>🔥</span> Radar Alfa & Patrones IA
+    </button>
+    <button class="nav-btn" id="btn-mode-ai" onclick="switchMainMode('ai')">
+      <span>🧠</span> Copilot IA & Automatización
+    </button>
+    <button class="nav-btn" id="btn-mode-smartmoney" onclick="switchMainMode('smartmoney')">
+      <span>🎯</span> Smart Money & KOLs
+    </button>
+    <button class="nav-btn" id="btn-mode-bot" onclick="switchMainMode('bot')">
+      <span>⚡</span> Bot Auto-Trader & Posiciones
+    </button>
+    <button class="nav-btn" id="btn-mode-3d" onclick="switchMainMode('3d')">
+      <span>🧊</span> Visor 3D Causal Forense
+    </button>
+  </nav>
+
+  <!-- LIVE TICKER & BOT TOGGLE -->
+  <div class="top-right">
+    <div class="ticker-pill">
+      <div class="ticker-item"><span class="ticker-label">SOL:</span><span class="ticker-val" id="top-sol">$150.00</span></div>
+      <div class="ticker-item"><span class="ticker-label">WR:</span><span class="ticker-val neon-green" id="top-wr">0%</span></div>
+      <div class="ticker-item"><span class="ticker-label">PnL:</span><span class="ticker-val neon-green" id="top-pnl">+0.00 SOL</span></div>
+      <div class="ticker-item"><span class="ticker-label">Abiertas:</span><span class="ticker-val" id="top-open-count">0</span></div>
+    </div>
+    <button class="bot-toggle-btn" id="btn-bot-toggle" onclick="toggleAutoBot()">
+      <span>🤖</span> BOT IA: ACTIVO
+    </button>
+    <button class="filter-chip" onclick="refreshAll()" title="Recargar datos">↺</button>
+  </div>
+</header>
+
+<!-- =========================================================================
+     VIEW 1: RADAR ALFA & DETECTOR DE PATRONES IA (HERO VIEW)
+     ========================================================================= -->
+<main class="view-container active" id="view-radar">
+  <!-- SUB-BAR / CONTROLS -->
+  <div class="radar-subbar">
+    <div class="search-wrap">
+      <span>🔍</span>
+      <input type="text" id="radar-search" class="search-input" placeholder="Filtrar por Símbolo, Token o CA (e.g. ALPHA, SoL1111...)" oninput="filterTokenStream()" />
+    </div>
+
+    <div class="filter-chips">
+      <button class="filter-chip active" onclick="setCategoryFilter('ALL', this)">Todos (<span id="cnt-all">0</span>)</button>
+      <button class="filter-chip" onclick="setCategoryFilter('HIGH_SCORE', this)">🟢 Alta Confluencia (≥ 80)</button>
+      <button class="filter-chip" onclick="setCategoryFilter('SMART_MONEY', this)">🎯 Smart Money</button>
+      <button class="filter-chip" onclick="setCategoryFilter('EXPANSION', this)">🔵 Expansión Orgánica</button>
+      <button class="filter-chip" onclick="setCategoryFilter('VETO', this)">🔴 Trampas / Vetos</button>
+    </div>
+
+    <div class="kpi-banner">
+      <div class="kpi-stat">
+        <span class="dim">Escaneados:</span>
+        <span class="ticker-val" id="kpi-scanned">0</span>
+      </div>
+      <div class="kpi-stat">
+        <span class="dim">Confluencias:</span>
+        <span class="ticker-val neon-green" id="kpi-confluence">0</span>
+      </div>
+      <div class="kpi-stat">
+        <span class="dim">Vetos Evitados:</span>
+        <span class="ticker-val bad" id="kpi-vetoed">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- SPLIT GRID -->
+  <div class="radar-grid">
+    <!-- LEFT: LIVE TOKEN STREAM -->
+    <div class="radar-stream" id="token-stream">
+      <div id="radar-loader" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:50px 20px; gap:12px; color:var(--dim); text-align:center;">
+        <div style="font-size:28px; animation: livePulse 1.2s infinite ease-in-out;">⚡</div>
+        <div style="font-size:13px; font-weight:700; color:#fff;">Sincronizando Radar Cuantitativo &amp; Modelos ML...</div>
+        <div style="font-size:11px; max-width:320px;">Cargando microestructuras causales on-chain, confluencia de Smart Money y escudos anti-rug.</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: TOKEN DEEP DIVE & ORDER PAD -->
+    <aside class="radar-inspector" id="radar-inspector">
+      <div class="insp-header">
+        <div>
+          <div class="insp-title" id="insp-token-title">Selecciona un Token</div>
+          <div class="dim" style="font-family:monospace; font-size:10px;" id="insp-token-ca">–</div>
+        </div>
+        <span class="brand-tag" id="insp-token-badge">AUDITORÍA IA</span>
+      </div>
+
+      <!-- SCORE DIAL -->
+      <div class="score-dial">
+        <div class="score-circle" id="insp-score-circle">--</div>
+        <div>
+          <div style="font-weight:700; font-size:13px;" id="insp-pattern-name">Patrón No Seleccionado</div>
+          <div class="dim" style="font-size:10.5px;" id="insp-pattern-ev">EV Esperado: –</div>
+        </div>
+      </div>
+
+      <!-- CAUSAL BREAKDOWN -->
+      <div class="causal-trigger" id="insp-causal-desc">
+        Selecciona cualquier token del flujo en vivo a la izquierda para inspeccionar su confluencia causal, estructura de liquidez, billeteras de smart money asociadas y plan de salidas disciplinado.
+      </div>
+
+      <!-- EXIT TARGET LADDER -->
+      <div class="exit-ladder">
+        <div style="font-size:10px; font-weight:700; color:var(--dim); text-transform:uppercase; margin-bottom:4px;">
+          Plan de Salidas Disciplinadas (Protocolo Antigravity)
+        </div>
+        <div class="ladder-step">
+          <span class="ladder-label ok">🎯 TP1 Parcial (+50%):</span>
+          <span class="ladder-val ok" id="insp-tp1">–</span>
+        </div>
+        <div class="ladder-step">
+          <span class="ladder-label" style="color:var(--accent);">🛡️ Breakeven Lock (+25% → +5%):</span>
+          <span class="ladder-val" style="color:var(--accent);" id="insp-be">–</span>
+        </div>
+        <div class="ladder-step">
+          <span class="ladder-label neon-green">🚀 TP2 Runner (+150%):</span>
+          <span class="ladder-val neon-green" id="insp-tp2">–</span>
+        </div>
+        <div class="ladder-step">
+          <span class="ladder-label bad">🛑 Stop Loss Pánico (-33.49% real):</span>
+          <span class="ladder-val bad" id="insp-sl">–</span>
+        </div>
+      </div>
+
+      <!-- ORDER PAD -->
+      <div class="order-pad">
+        <div style="font-size:11px; font-weight:700;">Ejecución Inmediata Paper Forward</div>
+        <div class="order-sizes">
+          <div class="size-chip" onclick="selectOrderSize(0.5, this)">0.5 SOL</div>
+          <div class="size-chip active" onclick="selectOrderSize(1.0, this)">1.0 SOL</div>
+          <div class="size-chip" onclick="selectOrderSize(1.5, this)">1.5 SOL</div>
+          <div class="size-chip" onclick="selectOrderSize(2.5, this)">2.5 SOL</div>
+        </div>
+        <button class="btn-submit-order" id="btn-insp-buy" onclick="executeInspectorOrder()">
+          ⚡ EJECUTAR COMPRA PAPER
+        </button>
+        <button class="filter-chip" style="width:100%; padding:8px; border-color:var(--purple); color:var(--purple); margin-top:6px; font-weight:700;" onclick="auditSelectedTokenWithAi()">
+          🧠 AUDITORÍA FORENSE IA REAL
+        </button>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<!-- =========================================================================
+     VIEW AI: COPILOT IA, COMANDOS (/goal, /boost, /browser) Y AUTOMATIZACIÓN
+     ========================================================================= -->
+<main class="view-container" id="view-ai">
+  <!-- LEFT: INTERACTIVE AI TERMINAL -->
+  <div class="ai-terminal-panel">
+    <div class="ai-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:16px;">🧠</span>
+        <span style="font-weight:700;">Copilot Cuantitativo & Terminal Autónomo</span>
+        <span class="brand-tag" id="ai-active-model-tag">Gemini 2.5 Flash</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="live-dot" title="IA Lista"></span>
+        <span style="font-size:10.5px; color:var(--neon-green);" id="ai-status-indicator">Online</span>
+      </div>
+    </div>
+
+    <!-- CHAT STREAM -->
+    <div class="ai-chat-stream" id="ai-chat-stream">
+      <div class="ai-chat-msg bot">
+        <b>👋 Hola, soy tu Copiloto Cuantitativo con IA Real para Solana DEX.</b>
+        <span>Estoy conectado a los modelos de machine learning entrenados en <code>custom.db</code> y al motor de inferencia en vivo.</span>
+        <span>Puedo ayudarte a auditar contratos, calibrar modelos, vigilar ballenas o ejecutar órdenes paper forward.</span>
+        <div style="margin-top:4px; font-size:11px; color:var(--accent);">Prueba los comandos directos: <code>/boost</code>, <code>/goal</code>, <code>/browser &lt;mint&gt;</code></div>
+      </div>
+    </div>
+
+    <!-- QUICK ACTION CHIPS -->
+    <div class="ai-chips-bar">
+      <button class="filter-chip" onclick="quickAiCommand('/boost')">⚡ /boost (Recalibrar ML)</button>
+      <button class="filter-chip" onclick="quickAiCommand('/goal')">🎯 /goal (Ver Objetivos)</button>
+      <button class="filter-chip" onclick="quickAiCommand('/goal eval')">📊 /goal eval (Supervisar Metas)</button>
+      <button class="filter-chip" onclick="quickAiBrowserCommand()">🌐 /browser (Auditar DexScreener)</button>
+      <button class="filter-chip" onclick="quickAiCommand('Analiza los 3 tokens con mejor confluencia en el radar')">🔍 Top 3 Tokens</button>
+      <button class="filter-chip" onclick="quickAiCommand('Explica la politica estricta de Stop Loss -33.49% real')">🛡️ Riesgo Real</button>
+    </div>
+
+    <!-- PROMPT INPUT BAR -->
+    <div class="ai-prompt-bar">
+      <input type="text" id="ai-prompt-input" class="ai-input" placeholder="Pregunta a la IA o escribe un comando (/boost, /goal, /browser)..." onkeydown="if(event.key==='Enter') sendAiMessage()" />
+      <button class="btn-submit-order" style="padding: 6px 16px; margin: 0;" onclick="sendAiMessage()">Enviar</button>
+    </div>
+  </div>
+
+  <!-- RIGHT: CONTROL CENTER & MODULES -->
+  <div class="ai-side-panel">
+    <!-- MODULE 1: AI MODEL & CONFIGURATION -->
+    <div class="ai-box">
+      <div class="ai-box-title">
+        <span>⚙️ Configuración del Motor IA</span>
+        <span class="shield-badge safe" id="ai-provider-badge">GEMINI CONECTADO</span>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px; font-size:11px;">
+        <label>
+          <span class="dim">Proveedor LLM:</span>
+          <select id="ai-provider-select" style="width:100%; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; margin-top:3px;" onchange="updateProviderOptions()">
+            <option value="gemini">Google Gemini (Gemini 2.5 Flash)</option>
+            <option value="ollama">Ollama Local (Open-Source 11434)</option>
+            <option value="groq">Groq Cloud (Llama 3.3 70B)</option>
+            <option value="anthropic">Anthropic Claude (Haiku / Sonnet)</option>
+          </select>
+        </label>
+
+        <div id="ai-key-wrap">
+          <label>
+            <span class="dim" id="ai-key-label">API Key:</span>
+            <div style="display:flex; gap:4px; margin-top:3px;">
+              <input type="password" id="ai-key-input" placeholder="Pega tu API Key..." style="flex:1; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; font-size:11px;" />
+              <button type="button" class="filter-chip" style="padding:4px 8px;" onclick="toggleKeyVisibility()">👁️</button>
+            </div>
+          </label>
+        </div>
+
+        <div id="ai-ollama-wrap" style="display:none; flex-direction:column; gap:6px;">
+          <label>
+            <span class="dim">Host Ollama Local:</span>
+            <div style="display:flex; gap:4px; margin-top:3px;">
+              <input type="text" id="ai-ollama-host" style="flex:1; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; font-size:11px;" value="http://127.0.0.1:11434" />
+              <button type="button" class="filter-chip" style="padding:4px 8px; color:var(--neon-green); border-color:var(--neon-green);" onclick="detectOllamaModelsFromUi()" title="Buscar modelos instalados">🔍 Detectar</button>
+            </div>
+          </label>
+        </div>
+
+        <label>
+          <span class="dim">Nombre del Modelo:</span>
+          <input type="text" id="ai-model-input" style="width:100%; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; margin-top:3px;" value="gemini-2.5-flash" />
+        </label>
+
+        <div style="display:flex; gap:6px; margin-top:2px;">
+          <button class="filter-chip" style="flex:1; padding:6px; background:rgba(0,229,255,0.12); border-color:var(--accent); color:var(--accent); font-weight:700;" onclick="saveAiConfigFromUi()">
+            💾 Guardar Configuración
+          </button>
+          <button class="filter-chip" style="padding:6px 10px; background:rgba(0,255,170,0.1); border-color:var(--neon-green); color:var(--neon-green);" onclick="testAiConnectionFromUi()" title="Comprobar conectividad y latencia">
+            🧪 Probar
+          </button>
+        </div>
+        <div id="ai-test-result" style="display:none; font-size:10px; padding:6px; border-radius:4px; background:#080d16; border:1px solid var(--border);"></div>
+      </div>
+    </div>
+
+    <!-- MODULE 2: QUANTITATIVE ML BOOSTING (/boost) -->
+    <div class="ai-box">
+      <div class="ai-box-title">
+        <span>🚀 Machine Learning Booster (/boost)</span>
+        <span class="shield-badge" id="ml-status-badge">ROC-AUC: 0.9100</span>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:10.5px;">
+        <div style="background:#080d16; padding:8px; border-radius:5px;">
+          <span class="dim">Muestras DB:</span><br/><b id="ml-train-samples">29,598 tokens</b>
+        </div>
+        <div style="background:#080d16; padding:8px; border-radius:5px;">
+          <span class="dim">Precisión Test:</span><br/><b class="ok" id="ml-accuracy">91.66%</b>
+        </div>
+        <div style="background:#080d16; padding:8px; border-radius:5px;">
+          <span class="dim">Modelo:</span><br/><b>HistGradientBoosting</b>
+        </div>
+        <div style="background:#080d16; padding:8px; border-radius:5px;">
+          <span class="dim">Slippage Real:</span><br/><b class="bad">-33.49% (BP-001)</b>
+        </div>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button class="filter-chip" style="flex:1; padding:8px; background:rgba(0,255,170,0.1); border-color:var(--neon-green); color:var(--neon-green); font-weight:700;" onclick="quickAiCommand('/boost')">
+          ⚡ /boost Estándar
+        </button>
+        <button class="filter-chip" style="padding:8px; background:rgba(0,229,255,0.1); border-color:var(--accent); color:var(--accent);" onclick="quickAiCommand('/boost deep')" title="Entrenamiento profundo">
+          Deep Boost
+        </button>
+      </div>
+    </div>
+
+    <!-- MODULE 3: AUTONOMOUS GOALS (/goal) -->
+    <div class="ai-box">
+      <div class="ai-box-title">
+        <span>🎯 Objetivos Autónomos (/goal)</span>
+        <button class="filter-chip" style="font-size:10px; padding:2px 8px; color:var(--neon-green); border-color:var(--neon-green);" onclick="evalGoalsFromUi()" title="Supervisar y autocalcular metas">⚡ Evaluar Metas</button>
+      </div>
+      <div id="ai-goals-list" style="display:flex; flex-direction:column; gap:6px; font-size:10.5px;">
+        <!-- Goals rendered dynamically -->
+      </div>
+      <div style="display:flex; gap:6px; margin-top:4px;">
+        <input type="text" id="ai-new-goal-input" placeholder="Nueva meta (ej. WR >= 65%)..." style="flex:1; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; font-size:11px;" />
+        <button class="filter-chip" style="padding:6px 10px;" onclick="addNewGoalFromUi()">+ Agregar</button>
+      </div>
+    </div>
+
+    <!-- MODULE 4: LIVE BROWSER AUDITOR (/browser) -->
+    <div class="ai-box">
+      <div class="ai-box-title">
+        <span>🌐 Auditor Visual en Navegador (/browser)</span>
+        <span class="shield-badge safe" id="browser-agent-status">PLAYWRIGHT LISTO</span>
+      </div>
+      <div style="font-size:10.5px; color:var(--dim);">
+        Abre y audita en modo headless contratos en DexScreener o Pump.fun capturando captura visual y datos on-chain.
+      </div>
+      <div style="display:flex; gap:6px;">
+        <input type="text" id="ai-browser-target" placeholder="Mint o URL..." style="flex:1; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; font-size:11px;" />
+        <button class="filter-chip" style="padding:6px 10px; background:rgba(168,85,247,0.15); border-color:var(--purple); color:var(--purple);" onclick="runBrowserInspectionFromUi()">Inspeccionar</button>
+      </div>
+      <div id="browser-preview-wrap" style="display:none; flex-direction:column; gap:6px; margin-top:6px;">
+        <span style="font-size:10px; color:var(--dim);">Última captura de pantalla generada:</span>
+        <img id="browser-preview-img" style="width:100%; height:140px; object-fit:cover; border-radius:6px; border:1px solid var(--border);" alt="Browser Snapshot" />
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- =========================================================================
+     VIEW 2: SMART MONEY & KOLS LIVE
+     ========================================================================= -->
+<main class="view-container" id="view-smartmoney">
+  <div class="radar-subbar">
+    <div style="font-weight:700; font-size:13px;">
+      🎯 Clasificación Cuantitativa de Billeteras ("A Quién Seguir")
+    </div>
+    <div class="filter-chips">
+      <button class="filter-chip active" onclick="filterWallets('ALL', this)">Todas</button>
+      <button class="filter-chip" onclick="filterWallets('FOLLOW', this)">🟢 Seguir (WR ≥ 55%)</button>
+      <button class="filter-chip" onclick="filterWallets('WATCH', this)">🟡 Observar</button>
+      <button class="filter-chip" onclick="filterWallets('AVOID', this)">🔴 Evitar (MEV / Tóxicas)</button>
+    </div>
+  </div>
+
+  <div class="table-box">
+    <table class="pro-table" id="tbl-wallets-pro">
+      <thead>
+        <tr>
+          <th>Billetera & Tag</th>
+          <th>Dirección</th>
+          <th>WR 7D</th>
+          <th>WR 30D</th>
+          <th>PnL Realizado</th>
+          <th>Operaciones</th>
+          <th>Holding Medio</th>
+          <th>Copiable (§2)</th>
+          <th>Veredicto</th>
+          <th>Razón Causal</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody id="tbl-wallets-body">
+        <!-- Rendered dynamically -->
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<!-- =========================================================================
+     VIEW 3: BOT AUTO-TRADER & POSICIONES PAPER
+     ========================================================================= -->
+<main class="view-container" id="view-bot">
+  <!-- BOT HUD -->
+  <div class="bot-hud-grid">
+    <div class="bot-hud-card">
+      <span class="bot-hud-label">Capital Inicial</span>
+      <span class="bot-hud-val">100.00 SOL</span>
+    </div>
+    <div class="bot-hud-card">
+      <span class="bot-hud-label">Capital Actual</span>
+      <span class="bot-hud-val neon-green" id="bot-capital-now">100.00 SOL</span>
+    </div>
+    <div class="bot-hud-card">
+      <span class="bot-hud-label">PnL Forward (paper · precios reales)</span>
+      <span class="bot-hud-val neon-green" id="bot-pnl-total">+0.00 SOL ($0.00)</span>
+    </div>
+    <div class="bot-hud-card">
+      <span class="bot-hud-label">Winrate General</span>
+      <span class="bot-hud-val ok" id="bot-wr-total">0%</span>
+    </div>
+    <div class="bot-hud-card">
+      <span class="bot-hud-label">Posiciones Abiertas</span>
+      <span class="bot-hud-val accent" id="bot-open-positions-count">0</span>
+    </div>
+    <div class="bot-hud-card">
+      <span class="bot-hud-label">Feed de Precios (DexScreener)</span>
+      <span class="bot-hud-val" id="bot-feed-status">—</span>
+    </div>
+  </div>
+
+  <!-- ACTIVE POSITIONS TABLE -->
+  <div style="font-weight:700; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+    <span>⚡ Posiciones Abiertas (Paper Forward · market cap real)</span>
+    <span class="dim" style="font-size:11px;">Evaluación continua de TP1 (+50%), Breakeven (+25%), TP2 (+150%) y SL (-33.49%)</span>
+  </div>
+
+  <div class="table-box">
+    <table class="pro-table">
+      <thead>
+        <tr>
+          <th>Token</th>
+          <th>Entrada MC</th>
+          <th>Actual MC</th>
+          <th>Tamaño</th>
+          <th>PnL %</th>
+          <th>PnL (USD)</th>
+          <th>Escalera de Salida Activa</th>
+          <th>Acción</th>
+        </tr>
+      </thead>
+      <tbody id="bot-positions-body">
+        <!-- Rendered dynamically -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- RECENT CLOSED TRADES -->
+  <div style="font-weight:700; font-size:13px; margin-top:8px;">
+    <span>📜 Historial Reciente de Operaciones Cerradas</span>
+  </div>
+
+  <div class="table-box">
+    <table class="pro-table">
+      <thead>
+        <tr>
+          <th>Token</th>
+          <th>Entrada MC</th>
+          <th>Salida MC</th>
+          <th>PnL %</th>
+          <th>PnL (USD)</th>
+          <th>Motivo de Salida (Causal)</th>
+        </tr>
+      </thead>
+      <tbody id="bot-closed-body">
+        <!-- Rendered dynamically -->
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<!-- =========================================================================
+     VIEW 4: VISOR 3D CAUSAL FORENSE (LEGACY COMPATIBLE)
+     ========================================================================= -->
+<main class="view-container" id="view-3d">
+  <canvas id="gl"></canvas>
+
+  <aside id="left-panel-3d">
+    <div style="font-weight:700; font-size:12px; color:var(--accent);">Auditoría de Sesgo de Lookahead</div>
+    <div style="font-size:10px; color:var(--dim);">Manifold 3D de 65,423 tokens de custom.db</div>
+    <table id="bias-table" style="font-size:10px; width:100%; margin-top:8px;">
+      <thead><tr><th>Segmento</th><th>Tokens</th><th>+50%</th><th>WR</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div style="margin-top:12px; font-size:10px; color:var(--dim); line-height:1.4;">
+      💡 El filtro con condición futura (<span class="warn">MC final ≥ $4,500</span>) genera una ilusión del 98%. Sin ella, la tasa cae a 20.57%.
+    </div>
+  </aside>
+
+  <aside id="right-panel-3d">
+    <div style="font-weight:700; font-size:12px; color:var(--neon-green);">Sandbox Cuantitativo</div>
+    <div class="control-group" style="margin-top:8px;">
+      <div style="display:flex; justify-content:space-between; font-size:10.5px;">
+        <span class="dim">First MC Máx:</span>
+        <span id="txt-fmc-max" class="accent">$4,285</span>
+      </div>
+      <input type="range" id="rng-fmc-max" min="500" max="25000" step="50" value="4285" oninput="on3dFilterChange()" />
+    </div>
+    <div class="control-group">
+      <div style="display:flex; justify-content:space-between; font-size:10.5px;">
+        <span class="dim">First Liq Máx:</span>
+        <span id="txt-fliq-max" class="accent">$1,725</span>
+      </div>
+      <input type="range" id="rng-fliq-max" min="100" max="5000" step="25" value="1725" oninput="on3dFilterChange()" />
+    </div>
+    <div class="control-group">
+      <div style="display:flex; justify-content:space-between; font-size:10.5px;">
+        <span class="dim">First Liq Mín:</span>
+        <span id="txt-fliq-min" class="accent">$0</span>
+      </div>
+      <input type="range" id="rng-fliq-min" min="0" max="2000" step="25" value="0" oninput="on3dFilterChange()" />
+    </div>
+    <div class="control-group">
+      <div style="display:flex; justify-content:space-between; font-size:10.5px;">
+        <span class="dim">Ratio Mín Liq/MC:</span>
+        <span id="txt-liq-ratio" class="accent">0%</span>
+      </div>
+      <input type="range" id="rng-liq-ratio" min="0" max="100" step="5" value="0" oninput="on3dFilterChange()" />
+    </div>
+    <div style="margin-top:8px;">
+      <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:11px;">
+        <input type="checkbox" id="chk-lookahead" onchange="on3dFilterChange()" />
+        <span class="warn">Activar Lookahead (MC Final ≥ $4,500)</span>
+      </label>
+    </div>
+    <input type="range" id="rng-final-mc" min="1000" max="25000" step="250" value="4500" style="display:none;" />
+  </aside>
+
+  <div id="scene-controls">
+    <button class="filter-chip" id="btn-rot" onclick="toggleRot()">Rotación</button>
+    <button class="filter-chip" onclick="resetCam()">Reset Cámara</button>
+  </div>
+</main>
+
+<!-- FLOATING TOOLTIP & TOAST -->
+<div id="tooltip"></div>
+<div id="toast"><span id="toast-msg">Notificación</span></div>
+
+<script>
+"use strict";
+
+// =========================================================================
+// APP STATE & CONFIG
+// =========================================================================
+let currentMode = "radar";
+let currentCategory = "ALL";
+let currentWalletCategory = "ALL";
+let rawTokens = [];
+let rawWallets = [];
+let botStatus = {};
+let selectedToken = null;
+let selectedOrderSizeVal = 1.0;
+let pollTimer = null;
+
+// =========================================================================
+// NAVIGATION SWITCHER
+// =========================================================================
+function switchMainMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".view-container").forEach(v => v.classList.remove("active"));
+
+  const btn = document.getElementById(`btn-mode-${mode}`);
+  const view = document.getElementById(`view-${mode}`);
+  if (btn) btn.classList.add("active");
+  if (view) view.classList.add("active");
+
+  if (mode === "3d") {
+    resize3dCanvas();
+  }
+}
+
+// =========================================================================
+// DATA FETCHING & SYNCHRONIZATION
+// =========================================================================
+async function refreshAll() {
+  await Promise.all([
+    fetchTokens(),
+    fetchWallets(),
+    fetchBotStatus(),
+    fetchAiStatus()
+  ]);
+  showToast("Datos actualizados en tiempo real");
+}
+
+async function fetchTokens() {
+  try {
+    const res = await fetch("/api/gmgn/tokens");
+    const data = await res.json();
+    if (data.ok && data.tokens) {
+      rawTokens = data.tokens;
+      renderTokens();
+    }
+  } catch (err) {
+    console.error("Error fetching tokens:", err);
+  }
+}
+
+async function fetchWallets() {
+  try {
+    const res = await fetch("/api/gmgn/wallets");
+    const data = await res.json();
+    if (data.ok && data.wallets) {
+      rawWallets = data.wallets;
+      renderWallets();
+    }
+  } catch (err) {
+    console.error("Error fetching wallets:", err);
+  }
+}
+
+async function fetchBotStatus() {
+  try {
+    const res = await fetch("/api/bot/status");
+    const data = await res.json();
+    if (data.ok) {
+      botStatus = data;
+      renderBotStatus();
+    }
+  } catch (err) {
+    console.error("Error fetching bot status:", err);
+  }
+}
+
+// Polling every 2.5 seconds
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    await Promise.all([
+      fetchBotStatus(),
+      fetchTokens()
+    ]);
+  }, 2500);
+}
+
+// =========================================================================
+// RENDER VIEW 1: TOKEN RADAR & PATTERN CARDS
+// =========================================================================
+function renderTokens() {
+  const container = document.getElementById("token-stream");
+  const query = (document.getElementById("radar-search").value || "").toLowerCase().trim();
+
+  let filtered = rawTokens.filter(t => {
+    // Category filter
+    if (currentCategory === "HIGH_SCORE" && t.confluence_score < 80) return false;
+    if (currentCategory === "SMART_MONEY" && t.smart_buyers_count < 1) return false;
+    if (currentCategory === "EXPANSION" && t.pattern.pattern_id !== "EXPANSION_BREAKOUT") return false;
+    if (currentCategory === "VETO" && t.verdict !== "VETO") return false;
+
+    // Search query
+    if (query) {
+      const matchSym = t.symbol.toLowerCase().includes(query);
+      const matchName = t.name.toLowerCase().includes(query);
+      const matchMint = t.mint.toLowerCase().includes(query);
+      if (!matchSym && !matchName && !matchMint) return false;
+    }
+    return true;
+  });
+
+  // KPIs
+  document.getElementById("kpi-scanned").textContent = rawTokens.length;
+  document.getElementById("kpi-confluence").textContent = rawTokens.filter(t => t.pattern.bias === "BULLISH").length;
+  document.getElementById("kpi-vetoed").textContent = rawTokens.filter(t => t.pattern.bias === "BEARISH_VETO").length;
+  document.getElementById("cnt-all").textContent = rawTokens.length;
+
+  container.innerHTML = "";
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--dim);">
+      No hay tokens coincidentes con los filtros seleccionados.
+      <br/><button class="filter-chip" style="margin-top:10px;" onclick="setCategoryFilter('ALL', document.querySelector('.filter-chip'))">Mostrar Todos</button>
+    </div>`;
+    return;
+  }
+
+  if (!selectedToken && filtered.length > 0) {
+    selectTokenForInspection(filtered[0]);
+  }
+
+  filtered.forEach(t => {
+    const isVeto = t.verdict === "VETO";
+    const isBull = t.pattern.bias === "BULLISH";
+    const cardCls = isVeto ? "vetoed" : (isBull ? "bullish" : "");
+    const bannerCls = isVeto ? "veto" : (isBull ? "bullish" : "neutral");
+
+    const card = document.createElement("div");
+    card.className = `token-card ${cardCls} ${selectedToken && selectedToken.mint === t.mint ? "selected" : ""}`;
+    card.onclick = () => selectTokenForInspection(t);
+
+    // Sparkline SVG generator
+    const sparkSvg = createSparklineSvg(t.sparkline || [10, 11, 10.5, 12, 13], isVeto ? "#ff3366" : "#00ffaa");
+
+    card.innerHTML = `
+      <div class="card-top">
+        <div class="token-identity">
+          <span class="token-symbol">${t.symbol}</span>
+          <span class="token-name">${t.name}</span>
+          <span class="token-ca" onclick="copyText('${t.mint}', event)" title="Copiar CA">
+            ${t.mint.slice(0, 4)}...${t.mint.slice(-4)} 📋
+          </span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="shield-badge ${t.confluence_score >= 80 ? 'safe' : ''}">Score: ${t.confluence_score}/100</span>
+          <span class="shield-badge">${t.price_change_5m >= 0 ? '+' : ''}${t.price_change_5m.toFixed(1)}%</span>
+        </div>
+      </div>
+
+      <div class="card-metrics">
+        <div class="cm-box"><span class="cm-label">Market Cap</span><span class="cm-val">$${t.market_cap_usd.toLocaleString()}</span></div>
+        <div class="cm-box"><span class="cm-label">Liquidez</span><span class="cm-val">$${t.liquidity_usd.toLocaleString()}</span></div>
+        <div class="cm-box"><span class="cm-label">Volumen 5m</span><span class="cm-val">$${(t.volume_5m_usd || 0).toLocaleString()}</span></div>
+        <div class="cm-box"><span class="cm-label">Smart Buyers</span><span class="cm-val accent">${t.smart_buyers_count}</span></div>
+      </div>
+
+      <div class="sparkline-wrap">${sparkSvg}</div>
+
+      <div class="pattern-banner ${bannerCls}">
+        <span>${t.pattern.label}</span>
+        <span>Conf: ${t.pattern.confidence_pct}% · EV: ${t.pattern.expected_ev}</span>
+      </div>
+
+      <div class="causal-trigger">
+        <b>Gatillo Causal:</b> ${t.pattern.causal_trigger}
+      </div>
+
+      <div class="card-footer">
+        <div class="badges-row">
+          ${(t.smart_buyers_tags || []).map(tg => `<span class="smart-badge">🎯 ${tg}</span>`).join('')}
+          <span class="shield-badge ${t.rug_ratio < 0.2 ? 'safe' : 'danger'}">Rug: ${(t.rug_ratio * 100).toFixed(0)}%</span>
+          <span class="shield-badge ${t.top10_concentration_pct < 30 ? 'safe' : 'danger'}">Top10: ${t.top10_concentration_pct.toFixed(1)}%</span>
+          <span class="shield-badge ${t.dev_balance_pct < 1.5 ? 'safe' : 'danger'}">Dev: ${t.dev_balance_pct.toFixed(1)}%</span>
+        </div>
+        <div class="actions-row" style="display:flex; gap:6px;">
+          <button class="filter-chip" style="padding:4px 8px; border-color:var(--purple); color:var(--purple); font-size:10.5px;" onclick="auditTokenFromCard('${t.mint}', '${t.symbol}', event)">🧠 Auditar IA</button>
+          ${!isVeto ? `<button class="btn-snipe" onclick="quickSnipe('${t.mint}', '${t.symbol}', ${t.market_cap_usd}, event)">⚡ Auto-Snipe 1.5 SOL</button>` : `<span class="shield-badge danger">🚫 VETADO</span>`}
+        </div>
+      </div>
+    `;
+
+    container.appendChild(card);
+  });
+
+  // Auto-select first token if none selected
+  if (!selectedToken && filtered.length > 0) {
+    selectTokenForInspection(filtered[0]);
+  }
+}
+
+function createSparklineSvg(points, strokeColor) {
+  if (!points || points.length < 2) return "";
+  const min = Math.min(...points);
+  const max = Math.max(...points) || 1;
+  const range = max - min || 1;
+  const w = 300;
+  const h = 34;
+
+  const pts = points.map((p, i) => {
+    const x = (i / (points.length - 1)) * w;
+    const y = h - ((p - min) / range) * (h - 6) - 3;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  return `
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%; height:100%; overflow:visible;">
+      <polyline fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${pts}" />
+    </svg>
+  `;
+}
+
+function selectTokenForInspection(t) {
+  selectedToken = t;
+  document.querySelectorAll(".token-card").forEach(c => c.classList.remove("selected"));
+
+  document.getElementById("insp-token-title").textContent = `${t.symbol} — ${t.name}`;
+  document.getElementById("insp-token-ca").textContent = t.mint;
+  document.getElementById("insp-score-circle").textContent = t.confluence_score;
+  document.getElementById("insp-pattern-name").textContent = t.pattern.label;
+  document.getElementById("insp-pattern-ev").textContent = `EV Esperado: ${t.pattern.expected_ev} · Confianza: ${t.pattern.confidence_pct}%`;
+  document.getElementById("insp-causal-desc").innerHTML = `<b>Diagnóstico Causal IA:</b> ${t.pattern.causal_trigger}<br/><br/>
+    <b>Microestructura de Liquidez:</b> Ratio Liq/MC: ${(t.liquidity_usd / Math.max(t.market_cap_usd, 1) * 100).toFixed(1)}% · Snipers Bloque 0: ${t.sniper_ratio_pct.toFixed(1)}%`;
+
+  if (t.tp_targets) {
+    document.getElementById("insp-tp1").textContent = `$${t.tp_targets.tp1_partial_50pct.toLocaleString()}`;
+    document.getElementById("insp-be").textContent = `$${t.tp_targets.breakeven_lock_25pct.toLocaleString()}`;
+    document.getElementById("insp-tp2").textContent = `$${t.tp_targets.tp2_runner_150pct.toLocaleString()}`;
+  }
+  document.getElementById("insp-sl").textContent = `$${t.sl_target.toLocaleString()} (-33.49%)`;
+
+  const btnBuy = document.getElementById("btn-insp-buy");
+  if (t.verdict === "VETO") {
+    btnBuy.disabled = true;
+    btnBuy.textContent = "🚫 VETADO POR RIESGO FORENSE";
+    btnBuy.style.background = "rgba(255,51,102,0.2)";
+    btnBuy.style.color = "var(--bad)";
+  } else {
+    btnBuy.disabled = false;
+    btnBuy.textContent = `⚡ EJECUTAR COMPRA PAPER (${selectedOrderSizeVal} SOL)`;
+    btnBuy.style.background = "linear-gradient(90deg, var(--neon-green), var(--accent))";
+    btnBuy.style.color = "#05070a";
+  }
+}
+
+function setCategoryFilter(cat, btn) {
+  currentCategory = cat;
+  document.querySelectorAll(".radar-subbar .filter-chip").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  renderTokens();
+}
+
+function filterTokenStream() {
+  renderTokens();
+}
+
+function selectOrderSize(size, chip) {
+  selectedOrderSizeVal = size;
+  document.querySelectorAll(".size-chip").forEach(c => c.classList.remove("active"));
+  chip.classList.add("active");
+  if (selectedToken && selectedToken.verdict !== "VETO") {
+    document.getElementById("btn-insp-buy").textContent = `⚡ EJECUTAR COMPRA PAPER (${selectedOrderSizeVal} SOL)`;
+  }
+}
+
+async function quickSnipe(mint, symbol, mc, event) {
+  if (event) event.stopPropagation();
+  try {
+    const res = await fetch("/api/bot/snipe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mint, symbol, market_cap_usd: mc, size_sol: 1.5 })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`¡Auto-Snipe ejecutado! Posición abierta en ${symbol} (1.5 SOL)`);
+      await fetchBotStatus();
+    }
+  } catch (err) {
+    showToast("Error en auto-snipe: " + err);
+  }
+}
+
+async function executeInspectorOrder() {
+  if (!selectedToken) return;
+  await quickSnipe(selectedToken.mint, selectedToken.symbol, selectedToken.market_cap_usd, null);
+}
+
+// =========================================================================
+// RENDER VIEW 2: SMART MONEY LEADERBOARD
+// =========================================================================
+function renderWallets() {
+  const tbody = document.getElementById("tbl-wallets-body");
+  tbody.innerHTML = "";
+
+  let filtered = rawWallets.filter(w => {
+    if (currentWalletCategory === "FOLLOW" && w.verdict !== "FOLLOW") return false;
+    if (currentWalletCategory === "WATCH" && w.verdict !== "WATCH") return false;
+    if (currentWalletCategory === "AVOID" && w.verdict !== "AVOID") return false;
+    return true;
+  });
+
+  filtered.forEach(w => {
+    const tr = document.createElement("tr");
+    const wr7Pct = (w.winrate_7d * 100).toFixed(1);
+    const wr30Pct = (w.winrate_30d * 100).toFixed(1);
+    const isFollow = w.verdict === "FOLLOW";
+    const isAvoid = w.verdict === "AVOID";
+    const vCls = isFollow ? "ok" : (isAvoid ? "bad" : "warn");
+
+    tr.innerHTML = `
+      <td><b>${w.tag}</b></td>
+      <td>
+        <span class="token-ca" onclick="copyText('${w.address}', event)">
+          ${w.address.slice(0, 4)}...${w.address.slice(-4)} 📋
+        </span>
+      </td>
+      <td class="${w.winrate_7d >= 0.55 ? 'ok' : 'bad'}">${wr7Pct}%</td>
+      <td>${wr30Pct}%</td>
+      <td class="${w.realized_pnl_usd >= 0 ? 'ok' : 'bad'}">$${w.realized_pnl_usd.toLocaleString()}</td>
+      <td>${w.total_trades}</td>
+      <td>${(w.avg_holding_time_s / 60).toFixed(1)} min</td>
+      <td>${w.is_copyable ? '<span class="ok">SÍ</span>' : '<span class="bad">NO (MEV)</span>'}</td>
+      <td><span class="${vCls}" style="font-weight:700;">${w.verdict}</span></td>
+      <td style="font-family:sans-serif; font-size:10.5px; color:var(--dim);">${w.reason}</td>
+      <td>
+        <button class="filter-chip" onclick="copyText('${w.address}', event)">Copiar</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function filterWallets(cat, btn) {
+  currentWalletCategory = cat;
+  document.querySelectorAll("#view-smartmoney .filter-chip").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  renderWallets();
+}
+
+// =========================================================================
+// RENDER VIEW 3: BOT AUTO-TRADER & POSICIONES PAPER
+// =========================================================================
+function renderBotStatus() {
+  if (!botStatus) return;
+
+  // Header pills
+  document.getElementById("top-wr").textContent = `${botStatus.winrate_pct ?? 0}%`;
+  document.getElementById("top-pnl").textContent = `${(botStatus.total_pnl_sol ?? 0) >= 0 ? '+' : ''}${botStatus.total_pnl_sol ?? 0} SOL`;
+  document.getElementById("top-open-count").textContent = botStatus.open_count ?? 0;
+
+  // Bot Toggle
+  const botBtn = document.getElementById("btn-bot-toggle");
+  if (botStatus.auto_bot_enabled) {
+    botBtn.className = "bot-toggle-btn";
+    botBtn.innerHTML = "<span>🤖</span> BOT IA: ACTIVO";
+  } else {
+    botBtn.className = "bot-toggle-btn paused";
+    botBtn.innerHTML = "<span>⏸️</span> BOT IA: PAUSADO";
+  }
+
+  // HUD
+  const capNow = 100.0 + (botStatus.total_pnl_sol ?? 0);
+  document.getElementById("bot-capital-now").textContent = `${capNow.toFixed(2)} SOL`;
+  document.getElementById("bot-pnl-total").textContent = `${(botStatus.total_pnl_sol ?? 0) >= 0 ? '+' : ''}${botStatus.total_pnl_sol ?? 0} SOL ($${botStatus.total_pnl_usd ?? 0})`;
+  document.getElementById("bot-wr-total").textContent = `${botStatus.winrate_pct ?? 0}%`;
+  document.getElementById("bot-open-positions-count").textContent = botStatus.open_count ?? 0;
+
+  // Feed de precios real (DexScreener): estado observable, no decorativo.
+  const feedEl = document.getElementById("bot-feed-status");
+  if (feedEl) {
+    const f = botStatus.feed || {};
+    if (f.source) {
+      feedEl.textContent = `${f.source} · ${f.calls ?? 0} calls · ${f.misses ?? 0} sin dato`;
+      feedEl.className = "bot-hud-val " + ((f.errors ?? 0) > 0 ? "warn" : "ok");
+    } else {
+      feedEl.textContent = "sin feed (precios congelados)";
+      feedEl.className = "bot-hud-val bad";
+    }
+  }
+
+  // Positions Table
+  const pBody = document.getElementById("bot-positions-body");
+  pBody.innerHTML = "";
+  const positions = botStatus.open_positions || [];
+
+  if (positions.length === 0) {
+    pBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--dim); padding:20px;">Sin posiciones abiertas activas en este momento.</td></tr>`;
+  } else {
+    positions.forEach(p => {
+      const tr = document.createElement("tr");
+      const pnlCls = p.pnl_pct >= 0 ? "ok" : "bad";
+
+      // Progress bar percentage between -33.49% and +150%
+      const pctClamped = Math.max(-33.49, Math.min(150, p.pnl_pct));
+      const barFillPct = ((pctClamped - (-33.49)) / (150 - (-33.49))) * 100;
+
+      tr.innerHTML = `
+        <td><b>${p.symbol}</b> <span class="dim" style="font-size:10px;">${p.mint.slice(0, 4)}...</span></td>
+        <td>$${p.entry_mc.toLocaleString()}</td>
+        <td>$${p.current_mc.toLocaleString()}</td>
+        <td>${p.size_sol} SOL</td>
+        <td class="${pnlCls}"><b>${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(2)}%</b></td>
+        <td class="${pnlCls}">$${p.pnl_usd.toFixed(2)}</td>
+        <td style="min-width:200px;">
+          <div class="exit-bar-wrap">
+            <div class="exit-bar-fill" style="width:${barFillPct.toFixed(1)}%;"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:9.5px; color:var(--dim);">
+            <span class="bad">SL -33.5%</span>
+            <span>0%</span>
+            <span style="color:var(--accent);">BE +25%</span>
+            <span class="ok">TP1 +50%</span>
+            <span class="neon-green">TP2 +150%</span>
+          </div>
+        </td>
+        <td>
+          <button class="btn-close-pos" onclick="closePosition('${p.mint}')">Cerrar</button>
+        </td>
+      `;
+      pBody.appendChild(tr);
+    });
+  }
+
+  // Closed Trades Table
+  const cBody = document.getElementById("bot-closed-body");
+  cBody.innerHTML = "";
+  const closed = botStatus.recent_closed || [];
+
+  if (closed.length === 0) {
+    cBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--dim); padding:20px;">Sin historial de cierres todavía.</td></tr>`;
+  } else {
+    closed.forEach(c => {
+      const tr = document.createElement("tr");
+      const pnlCls = c.pnl_pct >= 0 ? "ok" : "bad";
+      tr.innerHTML = `
+        <td><b>${c.symbol}</b></td>
+        <td>$${c.entry_mc.toLocaleString()}</td>
+        <td>$${c.current_mc.toLocaleString()}</td>
+        <td class="${pnlCls}"><b>${c.pnl_pct >= 0 ? '+' : ''}${c.pnl_pct.toFixed(2)}%</b></td>
+        <td class="${pnlCls}">$${c.pnl_usd.toFixed(2)}</td>
+        <td style="font-family:sans-serif; font-size:11px; color:var(--accent);">🛡️ ${c.exit_reason || "MANUAL"}</td>
+      `;
+      cBody.appendChild(tr);
+    });
+  }
+}
+
+async function toggleAutoBot() {
+  try {
+    const res = await fetch("/api/bot/toggle", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`Bot Auto-Sniper ${data.auto_bot_enabled ? 'ACTIVADO' : 'PAUSADO'}`);
+      await fetchBotStatus();
+    }
+  } catch (err) {
+    showToast("Error toggling bot: " + err);
+  }
+}
+
+async function closePosition(mint) {
+  try {
+    const res = await fetch("/api/bot/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mint, reason: "MANUAL_UI_EXIT" })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast("Posición cerrada manualmente");
+      await fetchBotStatus();
+    }
+  } catch (err) {
+    showToast("Error cerrando posición: " + err);
+  }
+}
+
+// =========================================================================
+// VIEW 4: 3D CANVAS & FORENSIC CAUSAL VISOR
+// =========================================================================
+const cv = document.getElementById("gl");
+const ctx = cv.getContext("2d");
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+let PTS = [], PTS_META = [];
+let ROT = { x: -0.45, y: 0.75 };
+let CAM = { dist: 3.2, fov: 1.0 };
+let autoRotate = true;
+
+function resize3dCanvas() {
+  W = window.innerWidth;
+  H = window.innerHeight - 48;
+  cv.width = W * DPR;
+  cv.height = H * DPR;
+  cv.style.width = W + "px";
+  cv.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize3dCanvas);
+
+function logN(v, lo, hi) {
+  if (!isFinite(v) || v <= 0) v = lo;
+  v = Math.log10(Math.max(v, lo));
+  return (v - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo));
+}
+
+function project(x, y, z) {
+  const cy = Math.cos(ROT.y), sy = Math.sin(ROT.y);
+  const cx = Math.cos(ROT.x), sx = Math.sin(ROT.x);
+  let x1 = x * cy - z * sy;
+  let z1 = x * sy + z * cy;
+  let y1 = y * cx - z1 * sx;
+  let z2 = y * sx + z1 * cx;
+  const denom = Math.max(0.18, CAM.dist + z2);
+  const f = CAM.fov / denom;
+  return [W / 2 + x1 * f * W * 0.42, H / 2 - y1 * f * W * 0.42, z2];
+}
+
+function draw3d() {
+  if (currentMode !== "3d") {
+    requestAnimationFrame(draw3d);
+    return;
+  }
+  ctx.clearRect(0, 0, W, H);
+
+  // Bounding box
+  ctx.strokeStyle = "#16202e";
+  ctx.lineWidth = 1;
+  const corners = [
+    [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+    [-1, -1,  1], [1, -1,  1], [1, 1,  1], [-1, 1,  1]
+  ];
+  const edges = [
+    [0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]
+  ];
+  const proj = corners.map(c => project(c[0], c[1], c[2]));
+  ctx.beginPath();
+  for (const [a, b] of edges) {
+    ctx.moveTo(proj[a][0], proj[a][1]);
+    ctx.lineTo(proj[b][0], proj[b][1]);
+  }
+  ctx.stroke();
+
+  // Points
+  for (let i = 0; i < PTS.length; i++) {
+    const p = PTS[i];
+    const [px, py, pz] = project(p[0], p[1], p[2]);
+    if (pz < -1.15) continue;
+    const col = p[3] ? "rgba(0, 255, 170, 0.7)" : "rgba(255, 51, 102, 0.4)";
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(px, py, p[3] ? 2.5 : 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (autoRotate) {
+    ROT.y += 0.003;
+  }
+  requestAnimationFrame(draw3d);
+}
+
+function toggleRot() {
+  autoRotate = !autoRotate;
+}
+function resetCam() {
+  ROT = { x: -0.45, y: 0.75 };
+}
+
+function on3dFilterChange() {
+  const fmc = document.getElementById("rng-fmc-max").value;
+  const fliq = document.getElementById("rng-fliq-max").value;
+  const fliqMin = document.getElementById("rng-fliq-min").value;
+  const ratio = document.getElementById("rng-liq-ratio").value;
+  document.getElementById("txt-fmc-max").textContent = `$${parseInt(fmc).toLocaleString()}`;
+  document.getElementById("txt-fliq-max").textContent = `$${parseInt(fliq).toLocaleString()}`;
+  document.getElementById("txt-fliq-min").textContent = `$${parseInt(fliqMin).toLocaleString()}`;
+  document.getElementById("txt-liq-ratio").textContent = `${ratio}%`;
+}
+
+async function load3dSnapshot() {
+  try {
+    const res = await fetch("/api/state");
+    const s = await res.json();
+    if (s.ok) {
+      PTS_META = s.point_meta || [];
+      PTS = (s.points || []).map(p => [
+        logN(p[0], 1, 1e5) * 2 - 1,
+        logN(p[1], 1, 1e4) * 2 - 1,
+        logN(p[2], 1, 1e7) * 2 - 1,
+        p[3]
+      ]);
+
+      // Bias table
+      let btHtml = "";
+      for (const b of (s.bias || [])) {
+        const isTrap = b.label.indexOf("ILUSIÓN") >= 0;
+        btHtml += `<tr style="${isTrap ? 'color:var(--bad);' : 'color:var(--ok);'}">
+          <td>${isTrap ? '⚠️ Con Lookahead' : '🟢 Causal (Observable)'}</td>
+          <td>${b.n_tokens}</td>
+          <td>${b.hit50_pct.toFixed(1)}%</td>
+          <td>${b.paper_wr_pct ? b.paper_wr_pct.toFixed(1) + '%' : '–'}</td>
+        </tr>`;
+      }
+      const bBody = document.getElementById("bias-table").querySelector("tbody");
+      if (bBody) bBody.innerHTML = btHtml;
+    }
+  } catch (err) {
+    console.error("Error loading 3D snapshot:", err);
+  }
+}
+
+// =========================================================================
+// UTILITIES
+// =========================================================================
+function copyText(txt, event) {
+  if (event) event.stopPropagation();
+  navigator.clipboard.writeText(txt).then(() => {
+    showToast(`Copiado: ${txt}`);
+  });
+}
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  document.getElementById("toast-msg").textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 3000);
+}
+
+// =========================================================================
+// VIEW AI: COPILOT IA, COMANDOS (/goal, /boost, /browser) Y CONFIGURACIÓN
+// =========================================================================
+let aiStatus = null;
+
+async function fetchAiStatus() {
+  try {
+    const res = await fetch("/api/ai/status");
+    const data = await res.json();
+    if (data.ok) {
+      aiStatus = data;
+      renderAiStatus(data);
+    }
+  } catch (err) {
+    console.error("Error fetching AI status:", err);
+  }
+}
+
+function renderAiStatus(data) {
+  if (!data) return;
+  const prov = data.active_provider || "gemini";
+  const provInfo = (data.providers && data.providers[prov]) || {};
+  const modelName = provInfo.model || "gemini-2.5-flash";
+
+  const modelTag = document.getElementById("ai-active-model-tag");
+  if (modelTag) modelTag.textContent = `${prov.toUpperCase()} (${modelName})`;
+
+  const badge = document.getElementById("ai-provider-badge");
+  if (badge) {
+    badge.textContent = `${prov.toUpperCase()}: ${provInfo.available ? 'CONECTADO' : 'OFFLINE'}`;
+    badge.className = `shield-badge ${provInfo.available ? 'safe' : 'danger'}`;
+  }
+
+  const provSelect = document.getElementById("ai-provider-select");
+  if (provSelect && !provSelect.dataset.userChanged) {
+    provSelect.value = prov;
+  }
+  const modelInput = document.getElementById("ai-model-input");
+  if (modelInput && !modelInput.dataset.userChanged) {
+    modelInput.value = modelName;
+  }
+
+  // ML Quant Booster metrics
+  const qm = data.quant_model || {};
+  const rocBadge = document.getElementById("ml-status-badge");
+  if (rocBadge) rocBadge.textContent = `ROC-AUC: ${(qm.test_roc_auc || 0.91).toFixed(4)}`;
+  const trSamples = document.getElementById("ml-train-samples");
+  if (trSamples) trSamples.textContent = `${(qm.train_samples || 29598).toLocaleString()} tokens`;
+  const acc = document.getElementById("ml-accuracy");
+  if (acc) acc.textContent = `${((qm.test_accuracy || 0.9166) * 100).toFixed(2)}%`;
+
+  // Browser Agent status
+  const ba = data.browser_agent || {};
+  const baBadge = document.getElementById("browser-agent-status");
+  if (baBadge) {
+    baBadge.textContent = ba.available ? "CHROME / PLAYWRIGHT LISTO" : "SIN NAVEGADOR";
+    baBadge.className = `shield-badge ${ba.available ? 'safe' : 'warn'}`;
+  }
+
+  // Render Goals
+  fetchAiGoals();
+}
+
+async function fetchAiGoals() {
+  try {
+    const res = await fetch("/api/ai/goals");
+    const data = await res.json();
+    if (data.ok && data.goals) {
+      renderAiGoals(data.goals);
+    }
+  } catch (err) {
+    console.error("Error fetching goals:", err);
+  }
+}
+
+function renderAiGoals(goals) {
+  const container = document.getElementById("ai-goals-list");
+  if (!container) return;
+  container.innerHTML = "";
+  goals.forEach(g => {
+    const item = document.createElement("div");
+    item.style.cssText = "background:#080d16; border:1px solid #141c2a; border-radius:5px; padding:6px 8px; display:flex; justify-content:space-between; align-items:center; gap:8px;";
+    const isAch = g.status === 'ACHIEVED';
+    const isBrk = g.status === 'BREACHED';
+    const badgeCls = isAch ? 'safe' : (isBrk ? 'danger' : 'warn');
+    item.innerHTML = `
+      <div style="flex:1;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <b>${g.title}</b>
+          <span style="font-size:9.5px; color:var(--dim);">(${g.id})</span>
+        </div>
+        <div style="font-size:9.5px; color:var(--dim);">Meta: ${g.target_value} | Actual: ${g.current_value}</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span class="shield-badge ${badgeCls}">${g.status}</span>
+        <button style="background:transparent; border:none; color:var(--dim); cursor:pointer; font-size:12px; padding:2px 4px;" onclick="deleteGoal('${g.id}')" title="Eliminar objetivo">✕</button>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+function updateProviderOptions() {
+  const prov = document.getElementById("ai-provider-select").value;
+  const input = document.getElementById("ai-model-input");
+  const keyWrap = document.getElementById("ai-key-wrap");
+  const ollamaWrap = document.getElementById("ai-ollama-wrap");
+  input.dataset.userChanged = "true";
+
+  if (prov === "ollama") {
+    if (keyWrap) keyWrap.style.display = "none";
+    if (ollamaWrap) ollamaWrap.style.display = "flex";
+    input.value = "llama3";
+  } else {
+    if (keyWrap) keyWrap.style.display = "block";
+    if (ollamaWrap) ollamaWrap.style.display = "none";
+    if (prov === "gemini") input.value = "gemini-2.5-flash";
+    else if (prov === "anthropic") input.value = "claude-3-haiku-20240307";
+    else if (prov === "groq") input.value = "llama-3.3-70b-versatile";
+  }
+}
+
+function toggleKeyVisibility() {
+  const keyInput = document.getElementById("ai-key-input");
+  if (!keyInput) return;
+  keyInput.type = keyInput.type === "password" ? "text" : "password";
+}
+
+async function detectOllamaModelsFromUi() {
+  const hostInput = document.getElementById("ai-ollama-host");
+  const host = hostInput ? hostInput.value.trim() : "http://127.0.0.1:11434";
+  showToast("🔍 Buscando modelos en " + host + "...");
+  try {
+    const res = await fetch("/api/ai/ollama/models");
+    const data = await res.json();
+    if (data.ok && data.models && data.models.length > 0) {
+      showToast(`¡Detectados ${data.models.length} modelos en Ollama!`);
+      const modelInput = document.getElementById("ai-model-input");
+      if (modelInput) modelInput.value = data.models[0];
+    } else {
+      showToast("No se detectaron modelos o Ollama no está iniciado.");
+    }
+  } catch (err) {
+    showToast("Error conectando a Ollama: " + err);
+  }
+}
+
+async function testAiConnectionFromUi() {
+  const provider = document.getElementById("ai-provider-select").value;
+  const resDiv = document.getElementById("ai-test-result");
+  if (resDiv) {
+    resDiv.style.display = "block";
+    resDiv.innerHTML = "⏳ Probando conexión en vivo con " + provider.toUpperCase() + "...";
+  }
+  try {
+    const res = await fetch("/api/ai/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: provider })
+    });
+    const data = await res.json();
+    if (resDiv) {
+      if (data.ok) {
+        resDiv.innerHTML = `<span style="color:var(--neon-green);">✓ Conectado (${data.latency_ms}ms)</span><br/><span style="color:var(--dim);">${data.response || ''}</span>`;
+      } else {
+        resDiv.innerHTML = `<span style="color:var(--bad);">✕ Error (${data.latency_ms}ms): ${data.error || 'Sin respuesta'}</span>`;
+      }
+    }
+  } catch (err) {
+    if (resDiv) resDiv.innerHTML = `<span style="color:var(--bad);">✕ Error de red: ${err}</span>`;
+  }
+}
+
+async function evalGoalsFromUi() {
+  showToast("Evaluando objetivos cuantitativos de forma autónoma...");
+  try {
+    const res = await fetch("/api/ai/goal/eval", { method: "POST" });
+    const data = await res.json();
+    if (data.ok && data.goals) {
+      renderAiGoals(data.goals);
+      showToast("¡Objetivos evaluados y actualizados!");
+    }
+  } catch (err) {
+    showToast("Error evaluando objetivos: " + err);
+  }
+}
+
+async function deleteGoal(id) {
+  try {
+    const res = await fetch("/api/ai/goal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove", text: id })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`Objetivo ${id} eliminado`);
+      if (data.goals) renderAiGoals(data.goals);
+      else await fetchAiGoals();
+    }
+  } catch (err) {
+    showToast("Error eliminando objetivo: " + err);
+  }
+}
+
+async function saveAiConfigFromUi() {
+  const provider = document.getElementById("ai-provider-select").value;
+  const modelName = document.getElementById("ai-model-input").value;
+  const keyInput = document.getElementById("ai-key-input");
+  const apiKey = keyInput ? keyInput.value.trim() : "";
+  const ollamaHostInput = document.getElementById("ai-ollama-host");
+  const ollamaHost = ollamaHostInput ? ollamaHostInput.value.trim() : "";
+
+  const payload = { provider: provider };
+  if (provider === "gemini") {
+    payload.model_gemini = modelName;
+    if (apiKey) payload.gemini_api_key = apiKey;
+  } else if (provider === "anthropic") {
+    payload.model_anthropic = modelName;
+    if (apiKey) payload.anthropic_api_key = apiKey;
+  } else if (provider === "groq") {
+    payload.model_groq = modelName;
+    if (apiKey) payload.groq_api_key = apiKey;
+  } else if (provider === "ollama") {
+    payload.model_ollama = modelName;
+    if (ollamaHost) payload.ollama_host = ollamaHost;
+  }
+
+  try {
+    const res = await fetch("/api/ai/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast("Configuración de IA guardada");
+      await fetchAiStatus();
+    }
+  } catch (err) {
+    showToast("Error guardando config: " + err);
+  }
+}
+
+async function addNewGoalFromUi() {
+  const input = document.getElementById("ai-new-goal-input");
+  const text = input.value.trim();
+  if (!text) return;
+  try {
+    const res = await fetch("/api/ai/goal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add", text: text })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      input.value = "";
+      showToast("Nuevo objetivo agregado");
+      if (data.goals) renderAiGoals(data.goals);
+      else await fetchAiGoals();
+    }
+  } catch (err) {
+    showToast("Error agregando objetivo: " + err);
+  }
+}
+
+async function runBrowserInspectionFromUi() {
+  const input = document.getElementById("ai-browser-target");
+  const target = input.value.trim() || (selectedToken ? selectedToken.mint : "");
+  if (!target) {
+    showToast("Ingresa un mint o URL para inspeccionar");
+    return;
+  }
+  await sendAiMessage(`/browser ${target}`);
+}
+
+function quickAiCommand(cmd) {
+  sendAiMessage(cmd);
+}
+
+function quickAiBrowserCommand() {
+  const target = selectedToken ? selectedToken.mint : "https://dexscreener.com/solana";
+  sendAiMessage(`/browser ${target}`);
+}
+
+function auditTokenFromCard(mint, symbol, event) {
+  if (event) event.stopPropagation();
+  const token = rawTokens.find(t => t.mint === mint);
+  if (token) selectTokenForInspection(token);
+  switchMainMode("ai");
+  sendAiMessage(`Audita en profundidad el token ${symbol} (${mint}). Evalúa riesgo de rug, concentración y viabilidad causal.`);
+}
+
+function auditSelectedTokenWithAi() {
+  if (!selectedToken) {
+    showToast("Selecciona un token primero");
+    return;
+  }
+  switchMainMode("ai");
+  sendAiMessage(`Audita en profundidad el token ${selectedToken.symbol} (${selectedToken.mint}). Detalla microestructura, dev holding (${selectedToken.dev_balance_pct}%) y concentración top 10 (${selectedToken.top10_concentration_pct}%).`);
+}
+
+async function sendAiMessage(customText) {
+  const input = document.getElementById("ai-prompt-input");
+  const text = (customText || (input ? input.value : "")).trim();
+  if (!text) return;
+  if (!customText && input) input.value = "";
+
+  const stream = document.getElementById("ai-chat-stream");
+  const userMsg = document.createElement("div");
+  userMsg.className = "ai-chat-msg user";
+  userMsg.textContent = text;
+  stream.appendChild(userMsg);
+  stream.scrollTop = stream.scrollHeight;
+
+  const botMsg = document.createElement("div");
+  botMsg.className = "ai-chat-msg bot";
+  botMsg.innerHTML = "<span>⏳ Procesando con IA Cuantitativa...</span>";
+  stream.appendChild(botMsg);
+  stream.scrollTop = stream.scrollHeight;
+
+  try {
+    const res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: text,
+        context: {
+          selected_token: selectedToken,
+          auto_bot_enabled: botStatus ? botStatus.auto_bot_enabled : false,
+          total_tokens_count: rawTokens.length
+        }
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      let formatted = (data.response || "")
+        .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
+        .replace(/\*(.*?)\*/g, "<i>$1</i>")
+        .replace(/`([^`]+)`/g, "<code style='background:#07090e; padding:2px 5px; border-radius:3px;'>$1</code>")
+        .replace(/\n/g, "<br/>");
+      botMsg.innerHTML = formatted;
+
+      // Si fue /boost, refrescar métricas
+      if (data.command === "boost") {
+        await fetchAiStatus();
+        await fetchTokens();
+        showToast("¡Modelo ML reentrenado y radar actualizado!");
+      }
+
+      // Si fue /goal, refrescar lista
+      if (data.command === "goal" && data.goals) {
+        renderAiGoals(data.goals);
+      }
+
+      // Si fue /browser, actualizar preview de screenshot
+      if (data.command === "browser" && data.data && data.data.ok) {
+        const wrap = document.getElementById("browser-preview-wrap");
+        const img = document.getElementById("browser-preview-img");
+        if (wrap && img) {
+          wrap.style.display = "flex";
+          img.src = `/api/ai/browser/screenshot?t=${Date.now()}`;
+        }
+      }
+    } else {
+      botMsg.innerHTML = `<span style="color:var(--bad);">Error: ${data.error || "Fallo de respuesta"}</span>`;
+    }
+  } catch (err) {
+    botMsg.innerHTML = `<span style="color:var(--bad);">Error de conexión: ${err}</span>`;
+  }
+  stream.scrollTop = stream.scrollHeight;
+}
+
+// =========================================================================
+// INIT
+// =========================================================================
+window.addEventListener("DOMContentLoaded", async () => {
+  resize3dCanvas();
+  await refreshAll();
+  await load3dSnapshot();
+  await fetchAiStatus();
+  startPolling();
+  requestAnimationFrame(draw3d);
+});
+</script>
+</body>
+</html>

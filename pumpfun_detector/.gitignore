@@ -1,0 +1,48 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# --- Caché local de dependencias (no forma parte del repo) ---
+.work/
+
+# --- Temporales de herramientas / logs de ejecución ---
+.manus-*.tmp
+_demo_log.txt
+_p0_log.txt
+*.log
+
+# --- Bases de datos (incluye sidecars WAL/SHM de SQLite) ---
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.bak
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+# EXCEPCIÓN: mapping/config de esquema SÍ se versionan (no son .db)
+!mapping_pumpscope.json
+
+# --- Outputs generados (regenerables con main.py / scripts) ---
+resultados/
+resultados_*/
+outputs/
+scratch/
+cockpit/runtime/
+
+# --- Paquetes y volcados de trabajo ---
+*.zip
+*.gz
+*.tar
+*.jsonl
+
+# --- Sistema operativo ---
+Thumbs.db
+.DS_Store
+desktop.ini

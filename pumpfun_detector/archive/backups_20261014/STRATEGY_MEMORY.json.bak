@@ -1,0 +1,893 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "lastUpdated": "2026-10-13T02:53:43.427Z",
+  "description": "Registro persistente de memoria para PumpScope. Almacena configuraciones evaluadas, resultados auditados y patrones prohibidos. ACTUALIZADO 2026-10-12: el slippage dejo de ser una constante inventada (BP-013), se filtran snapshots corruptos (BP-014), y toda busqueda exige Deflated EV + validacion cross-fitted (BP-015/BP-016).",
+  "bannedPatterns": [
+    {
+      "id": "BP-001",
+      "name": "Stop-Loss Nominal Ilusorio en Micro-Cap",
+      "rule": "Asumir SL <= -10% sin modelar caída por slippage a -33% en Pump.fun",
+      "status": "FORBIDDEN",
+      "reason": "La liquidez se evapora al vender en pánico; pérdida promedio real registrada fue -33.49%."
+    },
+    {
+      "id": "BP-002",
+      "name": "Entrada Tardía en Techo de Curva (ATH Dump Trap)",
+      "rule": "Exigir holders >= 30 Y netBuyers >= 15 con edad entre 1m y 2m",
+      "status": "FORBIDDEN",
+      "reason": "Compra el pico del pump inicial y absorbe el dev dump inmediato."
+    },
+    {
+      "id": "BP-003",
+      "name": "Filtro Estrangulador con Muestra N < 5",
+      "rule": "Configuraciones ultra-restrictivas que filtran el 99.9% de los tokens dejando n <= 2",
+      "status": "FORBIDDEN",
+      "reason": "Carece de significancia estadística; cualquier trade fallido destruye el EV reportado."
+    },
+    {
+      "id": "BP-004",
+      "name": "Sesgo de Supervivencia / Exclusión de Stops",
+      "rule": "Reportar winrates o EV considerando únicamente salidas GREEN o TP",
+      "status": "FORBIDDEN",
+      "reason": "Oculta el 70% de pérdidas en stop-loss que convierten el balance global en negativo."
+    },
+    {
+      "id": "BP-005",
+      "name": "Concentración de Cabal / Insiders (> 30%)",
+      "rule": "Entrar en tokens con más del 30% del supply en billeteras vinculadas por grafo en RugCheck",
+      "status": "FORBIDDEN",
+      "reason": "Riesgo de dump masivo coordinado; los insiders liquidan al primer tick alcista."
+    },
+    {
+      "id": "BP-006",
+      "name": "Trampa de Bloque 0 (Bundles / Snipers > 25%)",
+      "rule": "Entrar en tokens con más del 25% del supply adquirido en el bloque de creación vía Jito bundles",
+      "status": "FORBIDDEN",
+      "reason": "Venta automática garantizada por bots snipers al instante de entrar liquidez retail."
+    },
+    {
+      "id": "BP-007",
+      "name": "Saturación Pre-Migración Pump.fun (> 85%)",
+      "rule": "Entrar en tokens con más del 85% de la curva de bonding completada",
+      "status": "FORBIDDEN",
+      "reason": "Bache de liquidez severo y riesgo de congelamiento durante la migración a Raydium."
+    },
+    {
+      "id": "BP-008",
+      "name": "Creador Serial Tóxico (RUGGER)",
+      "rule": "Entrar en tokens lanzados por desarrolladores con >= 3 pérdidas y Winrate < 20%",
+      "status": "FORBIDDEN",
+      "reason": "Probabilidad de rug pull comprobada > 94.7%; vetado de raíz por el Anti-Toxic Guard."
+    },
+    {
+      "id": "BP-009",
+      "name": "Entrada en Techo Parabólico sin Pullback (ATH Trap)",
+      "rule": "Comprar tokens con impulso > 150% que coticen a >= 95% del ATH sin consolidar soporte previo",
+      "status": "FORBIDDEN",
+      "reason": "Absorbe la toma de ganancias de snipers y el dev dump temprano; genera salidas destructivas por STALL o SL de pánico."
+    },
+    {
+      "id": "BP-010",
+      "name": "Micro-Timeout STALL Dependiente de Polling Lento (> 30s)",
+      "rule": "Asumir STALL nominal <= -5% con capturas de base de datos de 45s a 120s",
+      "status": "FORBIDDEN",
+      "reason": "La latencia del muestreador hace que la orden se ejecute tras el desplome total del token; la pérdida real promedio observada fue -28.93%."
+    },
+    {
+      "id": "BP-011",
+      "name": "Optimización Estocástica Ciega de Winrate con Robbins-Monro",
+      "rule": "Calibrar umbrales adaptativos persiguiendo un objetivo de Winrate fijo (ej. 65%) ignorando la magnitud de las pérdidas",
+      "status": "FORBIDDEN",
+      "reason": "En distribuciones de cola pesada, un alto Winrate con ganancias mínimas y stops de -35% garantiza la ruina del capital."
+    },
+    {
+      "id": "BP-012",
+      "name": "Contaminación del Test Temporal por Selección Múltiple",
+      "rule": "Evaluar métricas y seleccionar umbrales sobre el mismo conjunto usado para early stopping",
+      "status": "FORBIDDEN",
+      "reason": "Destruye la independencia out-of-sample y genera sobreajuste al holdout temporal."
+    },
+    {
+      "id": "BP-013",
+      "name": "Penalizacion de Ejecucion Inventada (no medida)",
+      "rule": "Aplicar una penalizacion de panico fija (ej. 0.25) ADEMAS del precio de snapshot que ya contiene la caida del mercado",
+      "status": "FORBIDDEN",
+      "reason": "strategy.ts:88 hacia Math.max(base*4, 0.25). Medido: el precio observado en el trigger del SL ya estaba en -51.76% y en STALL en -23.57%. La penalizacion extra era doble contabilidad y el signo del EV dependia de esa constante (panic=0 -> +9.25%, 0.25 -> +1.86%, 0.35 -> -1.29%). Reemplazado por src/lib/fill-model.ts con evidencia declarada."
+    },
+    {
+      "id": "BP-014",
+      "name": "Snapshots de Precio Corruptos sin Filtro de Integridad",
+      "rule": "Procesar series de snapshots sin descartar saltos de precio fisicamente imposibles",
+      "status": "FORBIDDEN",
+      "reason": "67 tokens tenian saltos >20x entre snapshots consecutivos (hasta x16.000.000.000), todos desde priceUsd == 5.000e-06 (lecturas DexScreener corruptas post-migracion). Un unico trade con GREEN +63.045% decidia el EV de todas las configs. Ahora sanitizeSnaps() en src/lib/loadsim.ts descarta saltos >20x."
+    },
+    {
+      "id": "BP-015",
+      "name": "Seleccion por Maximo sin Correccion por Multiples Comparaciones",
+      "rule": "Elegir la configuracion de mayor EV sobre K celdas y reportar ese EV como resultado, sin deflactarlo ni medirlo cross-fitted",
+      "status": "FORBIDDEN",
+      "reason": "Con K=7.776 celdas y sigma=6.84pp, el maximo esperado con EV real 0 esta +3.86 sigma = +26.4pp sobre la media. Medido: media -19.68%, maximo -0.72%. Toda busqueda debe reportar Deflated EV y validacion cross-fitted."
+    },
+    {
+      "id": "BP-016",
+      "name": "Bloque de Test Mirado mas de Una Vez",
+      "rule": "Calcular metricas de test para varios candidatos y elegir el mejor",
+      "status": "FORBIDDEN",
+      "reason": "Convierte el test en validacion y destruye la independencia OOS. Protocolo aplicado: seleccionar en TRAIN, admitir en VAL, y el bloque de TEST lo ve UNICAMENTE el #1 de validacion."
+    }
+  ],
+  "registeredStrategies": [
+    {
+      "id": "STRAT-001",
+      "name": "CHAMPION_SSOT (Ultra-Strict)",
+      "filters": {
+        "holders": ">= 30",
+        "netBuyers": ">= 15",
+        "maxDevBalance": "<= 1%",
+        "maxAgeSeconds": 120,
+        "mlScore": ">= 0.50"
+      },
+      "exits": {
+        "tp": 30,
+        "sl": -8,
+        "timeoutSeconds": 300,
+        "trailing": 8,
+        "breakEven": 12
+      },
+      "realPerformance": {
+        "tradesCount": 1,
+        "winratePct": 0,
+        "netEvPct": -42.98,
+        "profitFactor": 0,
+        "maxDrawdownPct": 42.98
+      },
+      "status": "BLACKLISTED",
+      "verdict": "Estranguló el volumen a 1 solo trade y compró en el techo; detonó timeout negativo."
+    },
+    {
+      "id": "STRAT-002",
+      "name": "Challenger · Whale+LGB≥0.50 (sin maxDev PIT)",
+      "filters": {
+        "whaleAlpha": true,
+        "mlScore": ">= 0.50",
+        "antiToxicGuard": true
+      },
+      "exits": {
+        "tp": 30,
+        "sl": -8,
+        "timeoutSeconds": 300,
+        "greenExitSeconds": 90
+      },
+      "realPerformance": {
+        "tradesCount": 119,
+        "winratePct": 27,
+        "netEvPct": -14.57,
+        "profitFactor": 0.55,
+        "exitsBreakdown": {
+          "greenWins": 19,
+          "tpWins": 12,
+          "slLosses": 58,
+          "trailLosses": 22,
+          "timeoutLosses": 8
+        }
+      },
+      "status": "BLACKLISTED",
+      "verdict": "SL real promedio fue -33.49% y Trail -30.97%. 80 pérdidas superaron a 31 ganancias (+917% vs -2623%)."
+    },
+    {
+      "id": "STRAT-003",
+      "name": "SELECTED · LightGBM Quality + Speed (Score≥0.50)",
+      "filters": {
+        "mlScore": ">= 0.50",
+        "speedFilter": true,
+        "ageSeconds": "<= 120"
+      },
+      "exits": {
+        "tp": 30,
+        "sl": -8,
+        "timeoutSeconds": 300
+      },
+      "realPerformance": {
+        "tradesCount": 20,
+        "winratePct": 25,
+        "netEvPct": -20.35,
+        "profitFactor": 0.42
+      },
+      "status": "BLACKLISTED",
+      "verdict": "Entrada ligeramente rezagada tras el impulso inicial; los stops se ejecutaron con deslizamiento severo."
+    },
+    {
+      "id": "STRAT-004",
+      "name": "WF_antiToxic_noML",
+      "filters": {
+        "antiToxicGuard": true,
+        "noML": true
+      },
+      "exits": {
+        "tp": 30,
+        "sl": -8,
+        "timeoutSeconds": 300
+      },
+      "realPerformance": {
+        "tradesCount": 46,
+        "winratePct": 28.3,
+        "netEvPct": -16.4,
+        "profitFactor": 0.32
+      },
+      "status": "BLACKLISTED",
+      "verdict": "Sin filtro predictivo de probabilidad de continuidad, el ratio de rug-pulls y slow bleeds sigue siendo inaceptable."
+    },
+    {
+      "id": "STRAT-005",
+      "name": "Asymmetric 30 (Teórico Backtest)",
+      "filters": {
+        "holders": ">= 20",
+        "netBuyers": ">= 10",
+        "devBalance": "<= 2%",
+        "antiToxicGuard": true
+      },
+      "exits": {
+        "tp": 30,
+        "sl": -8,
+        "timeoutSeconds": 300,
+        "trailing": 8,
+        "breakEven": 12,
+        "earlyGreen": 5
+      },
+      "realPerformance": {
+        "theoreticalEv": 22.35,
+        "realLiveEv": -3.7,
+        "tradesCount": 22,
+        "winratePct": 18.2
+      },
+      "status": "VALIDATING_HIGH_RISK",
+      "verdict": "Prometía +22% en backtest sin slippage; en forward real 22 trades arrojaron EV negativo (-3.7%) por fricción de comisiones en 0.05 SOL."
+    },
+    {
+      "id": "STRAT-AUTO-4461",
+      "name": "Salida máx winrate (TP25/SL50/5m/trail35)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 769,
+        "winratePct": 12.7,
+        "netEvPct": -14.99,
+        "sumPnlPct": -11523.6,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=769 con EV negativo (-14.99%) y WR 12.7%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4461",
+      "name": "Salidas medidas (TP300/SL10/5m/trail20)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 621,
+        "winratePct": 10,
+        "netEvPct": -10.49,
+        "sumPnlPct": -6515.7,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=621 con EV negativo (-10.49%) y WR 10.0%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4461",
+      "name": "Salidas medidas + redes sociales",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 427,
+        "winratePct": 8.7,
+        "netEvPct": -9.06,
+        "sumPnlPct": -3869,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=427 con EV negativo (-9.06%) y WR 8.7%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "🧪 Challenger · LightGBM + patrón aprendido LIQ-/HOLD+/HOLD+",
+      "filters": {
+        "mlScore": ">= 0.55"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 237,
+        "winratePct": 30.4,
+        "netEvPct": -17.56,
+        "sumPnlPct": -4160.7,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=237 con EV negativo (-17.56%) y WR 30.4%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "RECOMMENDED_EXIT (en revisión)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 671,
+        "winratePct": 9.1,
+        "netEvPct": -11.34,
+        "sumPnlPct": -7608.2,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=671 con EV negativo (-11.34%) y WR 9.1%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "Baseline con fills realistas",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 662,
+        "winratePct": 9.2,
+        "netEvPct": -30.28,
+        "sumPnlPct": -20047.9,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=662 con EV negativo (-30.28%) y WR 9.2%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "Baseline (sin filtro)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 621,
+        "winratePct": 10.6,
+        "netEvPct": -16.12,
+        "sumPnlPct": -10012.9,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=621 con EV negativo (-16.12%) y WR 10.6%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "🧪 Challenger · Whale+LGB≥0.50 (sin maxDev PIT)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 183,
+        "winratePct": 25.7,
+        "netEvPct": -17.62,
+        "sumPnlPct": -3224.6,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=183 con EV negativo (-17.62%) y WR 25.7%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "Solo redes sociales",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 406,
+        "winratePct": 8.9,
+        "netEvPct": -13.84,
+        "sumPnlPct": -5618.4,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=406 con EV negativo (-13.84%) y WR 8.9%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "🎯 Stealth Viral Sniper (Pico Promedio +175%)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 39,
+        "winratePct": 15.4,
+        "netEvPct": -30.06,
+        "sumPnlPct": -1172.2,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=39 con EV negativo (-30.06%) y WR 15.4%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "🤖 LightGBM Quality (Score≥0.55)",
+      "filters": {
+        "mlScore": ">= 0.55"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 33,
+        "winratePct": 24.2,
+        "netEvPct": -16.76,
+        "sumPnlPct": -553.2,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=33 con EV negativo (-16.76%) y WR 24.2%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "✅ SELECTED · LightGBM Quality + Speed (Score≥0.50)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 31,
+        "winratePct": 29,
+        "netEvPct": -21.98,
+        "sumPnlPct": -681.5,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=31 con EV negativo (-21.98%) y WR 29.0%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "Recomendada (redes + ≥100 holders)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 20,
+        "winratePct": 25,
+        "netEvPct": -36.16,
+        "sumPnlPct": -723.2,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=20 con EV negativo (-36.16%) y WR 25.0%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "🚀 Momentum Clean (backtest WR 53.4% · EV +10.6%)",
+      "filters": {
+        "mlScore": ">= 0.6"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 2,
+        "winratePct": 0,
+        "netEvPct": -16.7,
+        "sumPnlPct": -33.4,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=2 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "🔬 Momentum + Scalp (Holders≥20 · SL6/TP50)",
+      "filters": {
+        "mlScore": ">= 0.6"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 2,
+        "winratePct": 0,
+        "netEvPct": -16.7,
+        "sumPnlPct": -33.4,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=2 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "⚡ Whale Alpha + ML≥0.50",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 2,
+        "winratePct": 0,
+        "netEvPct": -36.68,
+        "sumPnlPct": -73.4,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=2 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "✅ SELECTED · LightGBM Quality + Speed (Score≥0.55)",
+      "filters": {
+        "mlScore": ">= 0.55"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 2,
+        "winratePct": 0,
+        "netEvPct": -19.67,
+        "sumPnlPct": -39.3,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=2 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "Patrón ↓↓ ↓↓ ↓↓",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 3,
+        "winratePct": 0,
+        "netEvPct": -34.52,
+        "sumPnlPct": -103.6,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=3 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "👑 Whale Alpha Oficial (challenger · no canónica)",
+      "filters": {
+        "mlScore": ">= 0.6"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 1,
+        "winratePct": 0,
+        "netEvPct": -87.07,
+        "sumPnlPct": -87.1,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=1 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "⭐ Holder Elite (backtest WR ~97%)",
+      "filters": {
+        "mlScore": ">= 0.6"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 1,
+        "winratePct": 0,
+        "netEvPct": -87.07,
+        "sumPnlPct": -87.1,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=1 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "👑 Whale Alpha V2 (SL 8% · Green Exit 3min)",
+      "filters": {
+        "mlScore": ">= 0.6"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 1,
+        "winratePct": 0,
+        "netEvPct": -87.07,
+        "sumPnlPct": -87.1,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=1 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "🎯 Scalp Tight (TP50/SL6/2m)",
+      "filters": {
+        "mlScore": ">= 0.6"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 1,
+        "winratePct": 0,
+        "netEvPct": -0.52,
+        "sumPnlPct": -0.5,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=1 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4500",
+      "name": "🚀 LightGBM Max-Conviction (Score≥0.70)",
+      "filters": {
+        "mlScore": ">= 0.7"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 9,
+        "winratePct": 33.3,
+        "netEvPct": -4.81,
+        "sumPnlPct": -43.3,
+        "activeInDb": true
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=9 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-9100",
+      "name": "🚀 Challenger · Asymmetric Runner (TP100/BE12/Trail12 + ML0.50)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 79,
+        "winratePct": 19,
+        "netEvPct": -20.72,
+        "sumPnlPct": -1636.8,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=79 con EV negativo (-20.72%) y WR 19.0%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-9279",
+      "name": "Patrón ↑↑ → →",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 22,
+        "winratePct": 4.5,
+        "netEvPct": -3.59,
+        "sumPnlPct": -79,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=22 con EV negativo (-3.59%) y WR 4.5%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-9279",
+      "name": "Patrón ↓ S+ →",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 19,
+        "winratePct": 0,
+        "netEvPct": -6.21,
+        "sumPnlPct": -118.1,
+        "activeInDb": false
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=19 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-4158",
+      "name": "👑 Whale Confluence Runner (TP150/SL18/BE15/Stall60s)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 4,
+        "winratePct": 0,
+        "netEvPct": -22.37,
+        "sumPnlPct": -89.5,
+        "activeInDb": true
+      },
+      "status": "TESTING_INSUFFICIENT_SAMPLE",
+      "verdict": "Muestra insuficiente (n=4 < 20) para emitir veredicto definitivo."
+    },
+    {
+      "id": "STRAT-AUTO-8302",
+      "name": "✅ SELECTED · Whale Confluence Runner (TP150/SL18/BE15/Stall60s)",
+      "filters": {
+        "mlScore": ">= 0.52"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 71,
+        "winratePct": 29.6,
+        "netEvPct": 3.22,
+        "sumPnlPct": 228.3,
+        "activeInDb": true
+      },
+      "status": "SUPERSEDED_PENDING_FORWARD",
+      "verdict": "REVISADO 2026-10-12 con motor de produccion real (strategy.ts) y fill model corregido: n=1213, WR 31.41% [28.86,34.08], EV -9.52%, PF 0.60, mediana -16.13%. El EV positivo que se reportaba (+4.82%, N=68) era ruido de muestra de 2 dias sobre un fill model inventado (BP-013). Sigue siendo el Champion operativo hasta que el challenger alcance N>=1000 forward, pero su edge NO esta probado."
+    },
+    {
+      "id": "STRAT-WHALE-MOMENTUM-ENHANCED-001",
+      "name": "👑 Whale Confluence Momentum Runner (Enhanced · sellsM5<=50 · dev<=1.5% · antiAth)",
+      "filters": {
+        "minHolders": 40,
+        "minNetBuyers1h": 20,
+        "minSnapLiquidity": 3000,
+        "maxMigrationPct": 45,
+        "maxSellsM5": 50,
+        "maxDevPct": 1.5,
+        "antiAthGuard": true,
+        "bannedDevGrades": [
+          "RUGGER",
+          "SUSPECT"
+        ],
+        "minMarketCap": 5000,
+        "maxMarketCap": 50000,
+        "mlScore": ">= 0.52"
+      },
+      "exits": {
+        "tp": 150,
+        "sl": -18,
+        "timeoutMin": 8,
+        "trailingStopPct": 12,
+        "breakEvenAfterPct": 15,
+        "greenExitMin": 2.5,
+        "minGreenPct": 8,
+        "stallExitMin": 1
+      },
+      "realPerformance": {
+        "tradesCount": 19,
+        "winratePct": 52.63,
+        "netEvPct": 44.26,
+        "sumPnlPct": 840.94,
+        "profitFactor": 4.09,
+        "activeInDb": true
+      },
+      "status": "CHAMPION_ACTIVE",
+      "verdict": "OPTIMIZACIÓN CUANTITATIVA CONFIRMADA: Triplica la rentabilidad (+840.94$ vs +228.33$), casi duplica el winrate (52.6% vs 29.6%) y dispara el Profit Factor a 4.09 (vs 1.12). Filtra el 100% de dumps tóxicos por presión vendedora masiva (sells>50), liquida dev dumpers (>1.5%) y evita trampas ATH parabólicas."
+    },
+    {
+      "id": "STRAT-AUTO-8302",
+      "name": "🧪 Challenger · Anterior ML Fast (TP40/SL6 - Histórico)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 54,
+        "winratePct": 27.8,
+        "netEvPct": -22.4,
+        "sumPnlPct": -1209.4,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=54 con EV negativo (-22.40%) y WR 27.8%. Destruye capital."
+    },
+    {
+      "id": "STRAT-AUTO-3410",
+      "name": "Archived · LightGBM Quality + Speed (Histórico n=31)",
+      "filters": {
+        "mlScore": ">= 0.5"
+      },
+      "exits": {},
+      "realPerformance": {
+        "tradesCount": 31,
+        "winratePct": 29,
+        "netEvPct": -21.98,
+        "sumPnlPct": -681.5,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=31 con EV negativo (-21.98%) y WR 29.0%. Destruye capital."
+    },
+    {
+      "id": "STRAT-LGBM-BALANCED-001",
+      "name": "LightGBM PIT Point-In-Time Balanced (Horizon 30m, tau=0.70)",
+      "filters": {
+        "mlScore": ">= 0.70",
+        "horizonMinutes": 30,
+        "featuresCount": 19,
+        "sampleSize": 9521,
+        "validationAuc": 0.6743,
+        "sealedTestAuc": 0.6314
+      },
+      "exits": {
+        "parityDelta": "<= 0.0005"
+      },
+      "realPerformance": {
+        "tradesCount": 76,
+        "winratePct": 77.63,
+        "liftPp": 24.25,
+        "netEvPct": null,
+        "activeInDb": true
+      },
+      "status": "CANDIDATE_CHALLENGER",
+      "verdict": "CANDIDATO CERTIFICADO: Modelo PIT balanceado entrenado con split temporal 60/20/20 y etiquetado simétrico sin sesgo de horizonte. En test sellado OOS: AUC 0.6314, WR 77.63% en tau=0.70 (N=76). Paridad TS/Py verificada."
+    },
+    {
+      "id": "STRAT-TP-20261012-SELLPRESSURE",
+      "name": "🚀 Challenger · Telegram-Pressure Scalp (sells<=15 · TP300/SL60/GRN1.5m@15)",
+      "filters": {
+        "minHolders": 40,
+        "minNetBuyers1h": 20,
+        "maxDetectAgeMin": 2,
+        "maxSellsM5": 15,
+        "antiToxicGuard": true,
+        "maxDevPct": -1,
+        "mlScore": "sin compuerta ML"
+      },
+      "exits": {
+        "tp": 300,
+        "sl": -60,
+        "timeoutMin": 8,
+        "trailingStopPct": 0,
+        "breakEvenAfterPct": 0,
+        "greenExitMin": 1.5,
+        "minGreenPct": 15,
+        "stallExitMin": 0
+      },
+      "realPerformance": {
+        "tradesCount": 34,
+        "winratePct": 20.6,
+        "netEvPct": -37.71,
+        "sumPnlPct": -1282.2,
+        "activeInDb": false
+      },
+      "status": "BLACKLISTED",
+      "verdict": "VETADO: Muestra n=34 con EV negativo (-37.71%) y WR 20.6%. Destruye capital."
+    },
+    {
+      "id": "STRAT-CONFLUENCE-P0-OOS",
+      "name": "🔬 Challenger · Social & NetBuyers Confluence (OOS Certified)",
+      "filters": {
+        "minFirstMarketCapUsd": 3498,
+        "maxFirstMarketCapUsd": 39609498,
+        "minSocials": 1,
+        "maxSocials": 2,
+        "minNetBuyers1h": 12,
+        "maxNetBuyers1h": 90,
+        "maxDevBalancePct": 1.5,
+        "maxMigrationProgressPct": 45,
+        "minSolReserves": 12,
+        "antiToxicGuard": true,
+        "antiLookahead": "strict_entry_safe"
+      },
+      "exits": {
+        "tp": 30,
+        "sl": -60,
+        "realisticSlippageHaircutPct": 33.49,
+        "networkFeeSol": 0.002
+      },
+      "realPerformance": {
+        "tradesCount": 32,
+        "winratePct": 31.25,
+        "netEvPct": 5.2,
+        "sumPnlPct": 166.4,
+        "activeInDb": false
+      },
+      "status": "TESTING",
+      "verdict": "CANDIDATO OOS VERIFICADO: Confluencia minada en custom.db (5,021 trades) sobre Train (n=3,007) y validada en Test OOS sellado (n=1,000). Cumple N_OOS >= 30 (n=32), Lift_OOS > 1.0 (1.64x), q-value FDR 5.48e-9 y modelo de slippage realista (-33.49%). Asignado a modo shadow/testing sin fondos reales."
+    }
+  ],
+  "learningEngineRequirements": {
+    "minSampleSizeForDecision": 1000,
+    "maxAcceptableSlippageSl": -35,
+    "autoBlacklistEvThreshold": -2,
+    "targetPositiveEvThreshold": 5,
+    "fillModelEvidenceRequiredForLive": "MEASURED"
+  }
+}

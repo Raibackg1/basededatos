@@ -1,0 +1,115 @@
+name: Nightly Nuitka Release
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # every day at 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  APP_NAME: "yfinance-ta-patterns"
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+
+      - name: Install Python deps (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade nuitka ta-lib yfinance pandas pytz numpy requests
+
+      - name: Install Python deps (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade nuitka ta-lib yfinance pandas pytz numpy requests
+
+      - name: Build executable (Windows onefile, no console)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $output = "${{ env.APP_NAME }}-windows-py${{ matrix.python }}.exe"
+          python -m nuitka main.py `
+            --onefile `
+            --assume-yes-for-downloads `
+            --output-dir=dist `
+            --output-filename=$output `
+            --windows-console-mode=disable
+
+      - name: Build executable (Unix onefile)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          short_os="${{ matrix.os }}" 
+          short_os="${short_os%%-*}"
+          output="${APP_NAME}-${short_os}-py${{ matrix.python }}"
+          python -m nuitka main.py \
+            --onefile \
+            --assume-yes-for-downloads \
+            --output-dir=dist \
+            --output-filename="${output}"
+          chmod +x "dist/${output}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuitka-${{ matrix.os }}-py${{ matrix.python }}
+          path: dist/*
+
+  release:
+    name: Publish nightly release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nuitka-*
+          path: dist
+          merge-multiple: true
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          find dist -type f -print0 | xargs -0 -I{} cp "{}" release-assets/
+
+      - name: Prepare tag
+        id: prep
+        run: |
+          DATE=$(date -u +%Y%m%d)
+          echo "tag=nightly-${DATE}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.prep.outputs.tag }}" release-assets/* \
+            --title "Nightly build ${{ steps.prep.outputs.tag }}" \
+            --notes "Automated Nuitka onefile builds (Windows/macOS/Linux)." \
+            --prerelease

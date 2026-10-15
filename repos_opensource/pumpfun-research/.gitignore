@@ -1,0 +1,33 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE/editor directories
+.vscode/
+.idea/
+*.swp
+
+# Environment and local config
+.env
+.env.*
+*.local
+.DS_Store
+
+# Logs and data dumps
+*.log
+*.csv
+*.tsv
+*.sqlite3
+
+# Tooling caches
+.cache/

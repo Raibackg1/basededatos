@@ -1,0 +1,44 @@
+# Maintainer: eminsk <M_N_N@tut.by>
+
+pkgname=python-yfinance-ta-patterns
+_name=yfinance_ta_patterns
+pkgver=0.3.35
+pkgrel=1
+pkgdesc="Institutional-grade market candlestick pattern scanner with multi-asset backtesting"
+arch=('any')
+url="https://github.com/eminsk/yfinance-ta-patterns"
+license=('MIT')
+depends=(
+  'python'
+  'python-pandas'
+  'python-numpy'
+  'python-pytz'
+  'python-rich'
+)
+optdepends=(
+  'python-yfinance: for live market data downloads via Yahoo Finance'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-wheel'
+  'python-setuptools'
+)
+source=("https://files.pythonhosted.org/packages/source/${_name::1}/${_name}/${_name}-${pkgver}.tar.gz")
+sha256sums=('755ba32285a37496880e7ea9567d4207d76b8c83ea5d356a94e97845869d800d')
+
+prepare() {
+  cd "${srcdir}/${_name}-${pkgver}"
+  sed -i '/"yfinance>=/d' pyproject.toml
+}
+
+build() {
+  cd "${srcdir}/${_name}-${pkgver}"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "${srcdir}/${_name}-${pkgver}"
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

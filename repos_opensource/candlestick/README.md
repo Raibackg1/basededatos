@@ -1,0 +1,799 @@
+# Candlestick
+
+[![Node.js CI workflow](https://github.com/cm45t3r/candlestick/actions/workflows/node.js.yml/badge.svg)](https://github.com/cm45t3r/candlestick/actions/workflows/node.js.yml)
+[![npm](https://img.shields.io/npm/v/candlestick.svg)](https://www.npmjs.com/package/candlestick)
+[![npm downloads](https://img.shields.io/npm/dm/candlestick.svg)](https://www.npmjs.com/package/candlestick)
+[![Install size](https://img.shields.io/npm/unpacked-size/candlestick)](https://www.npmjs.com/package/candlestick)
+[![Coverage Status](https://coveralls.io/repos/github/cm45t3r/candlestick/badge.svg?branch=main)](https://coveralls.io/github/cm45t3r/candlestick?branch=main)
+[![Socket Badge](https://socket.dev/api/badge/npm/package/candlestick)](https://socket.dev/npm/package/candlestick)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/cm45t3r/candlestick)](https://github.com/cm45t3r/candlestick/commits/main)
+
+A modern, modular JavaScript library for [candlestick pattern](https://en.wikipedia.org/wiki/Candlestick_chart) detection. Detects classic reversal and continuation patterns in OHLC (Open, High, Low, Close) price data, with a clean API and no native dependencies.
+
+- 📊 18 candlestick patterns, 29 variants across single, two, and three-candle formations
+- 📦 ESM & CommonJS dual export with full TypeScript definitions
+- 🌊 Streaming API for massive datasets (resident memory bounded by `chunkSize`, not dataset size)
+- 🔌 Plugin system for custom patterns, data validation, pattern metadata
+- ✅ Comprehensive test suite with high coverage (run `npm test` and `npm run coverage`)
+- 🪶 Zero runtime dependencies and no native build step — `npm install` never
+  invokes `node-gyp`, so it installs identically on Linux, Windows and macOS
+
+> **Requires Node.js >= 22.** Tested in CI on Node 22.x, 24.x and 26.x across Linux, Windows and macOS.
+
+---
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Pattern Detection Functions](#pattern-detection-functions)
+- [High-Level Pattern Chaining](#high-level-pattern-chaining)
+- [Examples](#examples)
+- [Full Example Files](#full-example-files)
+- [Performance](#performance)
+- [Development](#development)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+- [Upgrading to v3.0](#upgrading-to-v30)
+- [Upgrading to v2.1](#upgrading-to-v21)
+- [Upgrading from v1.x](#upgrading-from-v1x)
+- [FAQ](#faq)
+- [Further Reading](#further-reading)
+- [Changelog](#changelog)
+- [Roadmap](#roadmap)
+- [Code of Conduct](#code-of-conduct)
+- [License](#license)
+
+---
+
+## Quick Start
+
+### Installation
+
+```bash
+npm install candlestick
+```
+
+### CommonJS (Node.js)
+
+```js
+const { isHammer, hammer, patternChain, allPatterns } = require("candlestick");
+
+// Check single candle (small body in upper third, long lower shadow, tiny upper shadow)
+const candle = { open: 14, high: 15, low: 8, close: 14.5 };
+console.log(isHammer(candle)); // true
+
+// Find patterns in series
+const candles = [
+  { open: 14, high: 15, low: 8, close: 14.5 },
+  { open: 13, high: 18, low: 13, close: 13.2 },
+  { open: 12, high: 12.5, low: 7, close: 12.1 },
+];
+console.log(hammer(candles)); // [ 0, 2 ]
+
+// Detect all patterns at once
+const results = patternChain(candles, allPatterns);
+console.log(results); // [{ index, pattern, match }]
+```
+
+### ESM (Modern JavaScript)
+
+```js
+import { isHammer, hammer, patternChain, allPatterns } from "candlestick";
+
+const candles = [
+  { open: 14, high: 15, low: 8, close: 14.5 },
+  { open: 13, high: 18, low: 13, close: 13.2 },
+  { open: 12, high: 12.5, low: 7, close: 12.1 },
+];
+const results = patternChain(candles, allPatterns);
+console.log(results);
+```
+
+### TypeScript
+
+```typescript
+import { OHLC, PatternMatch, patternChain, allPatterns } from "candlestick";
+
+const candles: OHLC[] = [
+  { open: 10, high: 15, low: 8, close: 12 },
+  { open: 12, high: 16, low: 11, close: 14 },
+];
+
+const results: PatternMatch[] = patternChain(candles, allPatterns);
+// Full IntelliSense support ✓
+```
+
+---
+
+## Usage
+
+### Importing
+
+**CommonJS (Node.js):**
+
+```js
+// Import all patterns
+const candlestick = require("candlestick");
+
+// Or import only what you need
+const { isHammer, hammer, patternChain } = require("candlestick");
+```
+
+**ESM (Modern JavaScript):**
+
+```js
+// Import all patterns
+import candlestick from "candlestick";
+
+// Or import only what you need — named imports tree-shake
+import { isHammer, hammer, patternChain } from "candlestick";
+```
+
+### OHLC Format
+
+All functions expect objects with at least:
+
+```js
+{
+  open: Number,
+  high: Number,
+  low: Number,
+  close: Number
+}
+```
+
+Extra fields (`date`, `volume`, etc.) are **preserved unchanged** and passed through to every `match` result, so you can attach any metadata you need:
+
+```js
+const data = [
+  {
+    date: "2024-01-06",
+    open: 41490,
+    high: 41500,
+    low: 39200,
+    close: 41500,
+    volume: 61000,
+  },
+  // ...
+];
+
+const results = patternChain(data, allPatterns);
+console.log(results[0].match[0].date); // "2024-01-06"
+console.log(results[0].match[0].volume); // 61000
+```
+
+---
+
+## Pattern Detection Functions
+
+Every pattern has two API styles: a **boolean function** for checking individual candles, and an **array function** that scans a series and returns matching indices.
+
+<details>
+<summary><strong>Boolean (Single/Pair) Detection — returns <code>boolean</code></strong></summary>
+
+**Single candle:**
+
+- `isHammer(candle)` / `isBullishHammer(candle)` / `isBearishHammer(candle)`
+- `isInvertedHammer(candle)` / `isBullishInvertedHammer(candle)` / `isBearishInvertedHammer(candle)`
+- `isDoji(candle)`
+- `isMarubozu(candle)` / `isBullishMarubozu(candle)` / `isBearishMarubozu(candle)`
+- `isSpinningTop(candle)` / `isBullishSpinningTop(candle)` / `isBearishSpinningTop(candle)`
+
+**Two candles:**
+
+- `isBullishEngulfing(prev, curr)` / `isBearishEngulfing(prev, curr)`
+- `isBullishHarami(prev, curr)` / `isBearishHarami(prev, curr)`
+- `isBullishKicker(prev, curr)` / `isBearishKicker(prev, curr)`
+- `isHangingMan(prev, curr)` / `isShootingStar(prev, curr)`
+- `isPiercingLine(prev, curr)` / `isDarkCloudCover(prev, curr)`
+- `isTweezers(prev, curr)` / `isTweezersTop(prev, curr)` / `isTweezersBottom(prev, curr)`
+
+**Three candles:**
+
+- `isMorningStar(c1, c2, c3)` / `isEveningStar(c1, c2, c3)`
+- `isThreeWhiteSoldiers(c1, c2, c3)` / `isThreeBlackCrows(c1, c2, c3)`
+
+</details>
+
+<details>
+<summary><strong>Array (Series) Detection — returns <code>number[]</code> (indices)</strong></summary>
+
+**Single candle:**
+
+- `hammer(dataArray)` / `bullishHammer(dataArray)` / `bearishHammer(dataArray)`
+- `invertedHammer(dataArray)` / `bullishInvertedHammer(dataArray)` / `bearishInvertedHammer(dataArray)`
+- `doji(dataArray)`
+- `marubozu(dataArray)` / `bullishMarubozu(dataArray)` / `bearishMarubozu(dataArray)`
+- `spinningTop(dataArray)` / `bullishSpinningTop(dataArray)` / `bearishSpinningTop(dataArray)`
+
+**Two candles:**
+
+- `bullishEngulfing(dataArray)` / `bearishEngulfing(dataArray)`
+- `bullishHarami(dataArray)` / `bearishHarami(dataArray)`
+- `bullishKicker(dataArray)` / `bearishKicker(dataArray)`
+- `hangingMan(dataArray)` / `shootingStar(dataArray)`
+- `piercingLine(dataArray)` / `darkCloudCover(dataArray)`
+- `tweezers(dataArray)` / `tweezersTop(dataArray)` / `tweezersBottom(dataArray)`
+
+**Three candles:**
+
+- `morningStar(dataArray)` / `eveningStar(dataArray)`
+- `threeWhiteSoldiers(dataArray)` / `threeBlackCrows(dataArray)`
+
+</details>
+
+---
+
+## High-Level Pattern Chaining
+
+Scan a series for multiple patterns in one pass:
+
+```js
+const { patternChain, allPatterns } = require("candlestick");
+
+const matches = patternChain(dataArray, allPatterns);
+// matches: [
+//   { index: 3, pattern: 'hammer', match: [candleObj] },
+//   { index: 7, pattern: 'bullishEngulfing', match: [candleObj, candleObj] },
+//   ...
+// ]
+```
+
+You can also pass a custom list of patterns:
+
+```js
+const { patternChain, doji, bullishEngulfing } = require("candlestick");
+
+const matches = patternChain(dataArray, [
+  { name: "doji", fn: doji },
+  { name: "bullishEngulfing", fn: bullishEngulfing, paramCount: 2 },
+]);
+```
+
+### Strict Mode
+
+Pass `{ strict: true }` to throw on invalid OHLC data instead of silently skipping:
+
+```js
+patternChain(dataArray, allPatterns, { strict: true });
+// throws if any candle has high < low, NaN fields, etc.
+```
+
+> **Multi-candle patterns:** Two-candle patterns (Engulfing, Harami, Kicker, Hanging Man, Shooting Star, Piercing Line, Dark Cloud Cover, Tweezers Top/Bottom) return a `match` array with 2 candles. Three-candle patterns (Morning Star, Evening Star, Three White Soldiers, Three Black Crows) return 3. Single-candle patterns return 1. This is driven by the `paramCount` property on each pattern definition.
+
+### Trend-Context Confidence Adjustment
+
+The same candle shape can mean opposite things depending on what preceded it — a small body with a long lower shadow is a bullish `hammer` after a downtrend, but a bearish `hangingMan` after an uptrend. By default, pattern functions don't check this: they're evaluated independently, so the identical candle can be flagged as both, with contradictory signals. Each pattern also has a fixed, context-blind `confidence` in its metadata (e.g. `hammer: 0.7`) that doesn't distinguish a textbook occurrence from a marginal one.
+
+Pass a `trendContext` option to `patternChain` to measure the actual preceding trend and score how well it matches what each pattern expects:
+
+```js
+const { patternChain, allPatterns } = require("candlestick");
+const { enrichWithMetadata } = require("candlestick").metadata;
+
+const matches = patternChain(data, allPatterns, {
+  trendContext: { trendMethod: "sma-slope", trendPeriod: 10 },
+});
+const enriched = enrichWithMetadata(matches);
+
+// Each match now carries a `trendContext` label and a `contextFit` (0-1):
+// { index, pattern: "hammer", match, trendContext: "uptrend", contextFit: 0.13 }
+// { index, pattern: "hangingMan", match, trendContext: "uptrend", contextFit: 0.99 }
+//
+// `enrichWithMetadata` additionally computes `effectiveConfidence` (`confidence * contextFit`)
+// on the trend-aware alternative to the deprecated static `confidence`:
+console.log(enriched[0].metadata.effectiveConfidence); // 0.7 * 0.13 ≈ 0.09 (hammer, wrong context)
+console.log(enriched[1].metadata.effectiveConfidence); // 0.75 * 0.99 ≈ 0.74 (hangingMan, correct context)
+```
+
+Built-in `trendMethod` options: `"sma-slope"` (default), `"ema-slope"`, `"pct-change"` — see `src/trend.js`. As with the [Kicker gap threshold](#gap-significance-threshold-kicker), you can also supply `externalTrend` (a precomputed series) or `trendFn` (a per-candle callback) if you already have a more advanced trend/regime model.
+
+To automatically drop the weaker side of a same-candle, opposite-direction conflict instead of surfacing both, pass `resolveConflicts: true`:
+
+```js
+patternChain(data, allPatterns, {
+  trendContext: { trendMethod: "sma-slope", resolveConflicts: true },
+});
+// Only "hangingMan" survives in the example above; "hammer" (the worse contextFit) is dropped.
+```
+
+This is fully opt-in: omitting `trendContext` preserves `patternChain`'s pre-existing result shape exactly.
+
+---
+
+## Pattern Descriptions
+
+The library detects 18 patterns across 29 variants:
+
+| Category          | Patterns                                                                                                    |
+| ----------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Single candle** | Hammer, Inverted Hammer, Doji, Marubozu, Spinning Top                                                       |
+| **Two candle**    | Engulfing, Harami, Kicker, Hanging Man, Shooting Star, Piercing Line, Dark Cloud Cover, Tweezers Top/Bottom |
+| **Three candle**  | Morning Star, Evening Star, Three White Soldiers, Three Black Crows                                         |
+
+Each pattern includes bullish/bearish variants where applicable. For detailed descriptions with detection thresholds, see [docs/PATTERNS.md](./docs/PATTERNS.md).
+
+> **Note:** The library does not mutate your input data. Pattern functions return arrays of indices; `precomputeCandleProps` returns new enriched candle objects. When calling multiple pattern functions on the same raw array, precompute once for better performance (see [Performance](#performance)). `patternChain` handles this internally.
+
+---
+
+## Examples
+
+### Boolean Detection
+
+```js
+const { isBullishKicker, isBearishKicker } = require("candlestick");
+
+// Bullish candle, then bearish candle gapping down → bearish kicker
+const prev = { open: 40, high: 41, low: 39.5, close: 40.8 };
+const curr = { open: 39.5, high: 39.8, low: 38.5, close: 38.9 };
+
+console.log(isBullishKicker(prev, curr)); // false
+console.log(isBearishKicker(prev, curr)); // true
+```
+
+### Gap Significance Threshold (Kicker)
+
+By default, `bullishKicker`/`bearishKicker` (and the boolean `isBullishKicker`/`isBearishKicker`) treat **any** nonzero gap between the two candle bodies as a valid kicker — including gaps that are economically meaningless noise for a given instrument (e.g. a $0.30 gap on a $210 stock). Pass a `minGapVol` option to require the gap to clear a configurable, volatility-relative threshold instead. This is fully opt-in and backward compatible: omitting it (or `minGapVol: 0`) preserves the original behavior exactly.
+
+```js
+const { bullishKicker } = require("candlestick");
+
+// Only count gaps that are at least 0.5x the instrument's own recent ATR
+// (Average True Range, expressed as a percentage of price):
+bullishKicker(dataArray, { minGapVol: 0.5, volMethod: "atr", volPeriod: 14 });
+
+// Other built-in volatility measures: "stddev" (std. dev. of daily returns)
+// and "percentile" (historical percentile of this instrument's own past
+// gap sizes). See src/volatility.js for the exact definitions.
+bullishKicker(dataArray, {
+  minGapVol: 0.5,
+  volMethod: "stddev",
+  volPeriod: 20,
+});
+
+// Simple, no-history-required alternative: a flat percentage of the previous
+// close, independent of recent volatility. Here `minGapVol` is read directly
+// as a fraction (0.005 = 0.5%), not a multiplier:
+bullishKicker(dataArray, { minGapVol: 0.005, volMethod: "fixed-pct" });
+
+// Advanced: supply your own precomputed volatility series (e.g. from a GARCH
+// model fit externally) or a per-candle callback — both take precedence over
+// volMethod. See the `GapThresholdOptions` JSDoc in `src/kicker.js`.
+bullishKicker(dataArray, { minGapVol: 1, externalVolatility: myVolSeries });
+bullishKicker(dataArray, {
+  minGapVol: 1,
+  volatilityFn: (candles, index) => myModel.volatilityAt(index),
+});
+```
+
+### Finding Patterns in Series
+
+```js
+const { shootingStar } = require("candlestick");
+
+const data = [
+  { open: 29.01, high: 29.03, low: 28.56, close: 28.64 },
+  // ...
+];
+
+console.log(shootingStar(data)); // [index, ...]
+```
+
+### Pattern Chaining
+
+```js
+const { patternChain, allPatterns } = require("candlestick");
+const matches = patternChain(data, allPatterns);
+console.log(matches);
+// [ { index: 3, pattern: 'hammer', match: [Object] }, ... ]
+```
+
+### Streaming API
+
+For processing very large datasets efficiently with reduced memory usage:
+
+```js
+const { streaming } = require("candlestick");
+
+// Option 1: Using createStream with callbacks
+const stream = streaming.createStream({
+  patterns: ["hammer", "doji", "marubozu"],
+  chunkSize: 1000,
+  onMatch: (match) => console.log(match),
+  enrichMetadata: true,
+});
+
+// Process data in chunks
+for (const chunk of dataChunks) {
+  stream.process(chunk);
+}
+stream.end();
+
+// Option 2: Simple helper for large datasets
+const results = streaming.processLargeDataset(largeData, {
+  patterns: null, // all patterns
+  chunkSize: 1000,
+  enrichMetadata: true,
+});
+```
+
+**Stream lifecycle:** `end()` drains the buffer and finalizes the stream. It is
+idempotent — later calls return the same summary without re-emitting matches or
+firing `onProgress` again — and `process()` throws once a stream has ended, since
+resuming would skip the carry-over candles and miss patterns spanning that
+boundary. Call `reset()` to reuse a stream. The `totalProcessed` in the summary equals the
+total number of candles you passed to `process()` — the overlap re-scanned at
+each chunk boundary is counted once, not twice.
+
+**`chunkSize` is the internal buffer threshold, not a cap on what you hand to
+`process()`** — feeding one candle at a time works at any `chunkSize`. It must be
+at least as large as the longest active pattern (3 candles for the full built-in
+set, less for a narrower `patterns` subset); smaller values throw, since the
+chunk overlap would no longer advance.
+
+**Benefits:** Resident memory stays bounded by `chunkSize` instead of scaling
+with the dataset. Measured on 200,000 candles with five patterns: 41.9 MB live
+heap for `patternChain` against 0.2 MB for the stream — the same 61,866 matches
+in both cases.
+
+Two conditions are doing the work, and both are easy to lose:
+
+- **Consume matches in `onMatch` rather than collecting them.** Pushing every
+  match into an array puts the result set back in memory, and at high match
+  counts it dominates whatever the buffering saved.
+- **Feed the stream incrementally.** Passing `process()` slices of an array you
+  already built keeps that array resident, so there is nothing left to save.
+  `processLargeDataset` is a convenience wrapper and does both of these, so it
+  trades the memory benefit for a simpler call.
+
+See `examples/streaming.js`, which measures this and prints the comparison; run
+it with `node --expose-gc` for stable figures.
+
+### Data Validation
+
+```js
+const { validateOHLC, validateOHLCArray } = require("candlestick").utils;
+
+// Validate single candle
+try {
+  validateOHLC({ open: 10, high: 15, low: 8, close: 12 });
+  console.log("Valid candle ✓");
+} catch (error) {
+  console.error("Invalid:", error.message);
+}
+
+// Validate array of candles
+validateOHLCArray(candles); // throws on invalid data
+```
+
+### Plugin System
+
+```js
+const { plugins, patternChain } = require("candlestick");
+
+// Register custom pattern
+plugins.registerPattern({
+  name: "myCustomPattern",
+  fn: (dataArray) => {
+    return dataArray
+      .map((c, i) => (c.close > c.open && c.close === c.high ? i : -1))
+      .filter((idx) => idx !== -1);
+  },
+  paramCount: 1,
+  metadata: { type: "reversal", confidence: 0.85 },
+});
+
+// Use with patternChain
+const customPattern = plugins.getPattern("myCustomPattern");
+const results = patternChain(data, [customPattern]);
+```
+
+For more details on the plugin system, see [docs/PLUGIN_API.md](./docs/PLUGIN_API.md).
+
+### CLI Tool
+
+Detect patterns from command line:
+
+```bash
+# Install globally
+npm install -g candlestick
+
+# Detect patterns in JSON file
+candlestick -i data.json --output table
+
+# Filter by confidence
+candlestick -i data.csv --confidence 0.85 --output csv
+
+# Bullish reversals only
+candlestick -i data.json --type reversal --direction bullish
+
+# Use with pipes
+cat data.json | candlestick --output table
+```
+
+For complete CLI documentation, see [docs/CLI_GUIDE.md](./docs/CLI_GUIDE.md).
+
+---
+
+## Full Example Files
+
+See the [`examples/`](./examples/) directory for runnable, copy-pasteable usage of every pattern and utility:
+
+**Single Candle Patterns:**
+
+- [`examples/hammer.js`](./examples/hammer.js) — Hammer pattern detection
+- [`examples/invertedHammer.js`](./examples/invertedHammer.js) — Inverted Hammer pattern detection
+- [`examples/doji.js`](./examples/doji.js) — Doji pattern detection
+
+**Two Candle Patterns:**
+
+- [`examples/engulfing.js`](./examples/engulfing.js) — Engulfing pattern detection
+- [`examples/harami.js`](./examples/harami.js) — Harami pattern detection
+- [`examples/kicker.js`](./examples/kicker.js) — Kicker pattern detection
+- [`examples/reversal.js`](./examples/reversal.js) — Hanging Man and Shooting Star
+
+**Multi-Pattern Detection:**
+
+- [`examples/patternChain.js`](./examples/patternChain.js) — Multi-pattern detection with patternChain
+- [`examples/newPatterns.js`](./examples/newPatterns.js) — Morning/Evening Star, Three Soldiers/Crows, Piercing Line, Dark Cloud Cover
+- [`examples/newPatternsV2.js`](./examples/newPatternsV2.js) — Marubozu, Spinning Top, Tweezers
+- [`examples/streaming.js`](./examples/streaming.js) — Streaming API for large datasets
+- [`examples/esm-example.mjs`](./examples/esm-example.mjs) — ESM module syntax example
+- [`examples/metadata.js`](./examples/metadata.js) — Pattern metadata, filtering, and sorting
+
+**Utilities:**
+
+- [`examples/utils.js`](./examples/utils.js) — Utility functions: bodyLen, wickLen, tailLen, isBullish, isBearish, hasGapUp, hasGapDown, findPattern
+- [`examples/real-data.js`](./examples/real-data.js) — Real market data with date/volume fields, precomputeCandleProps, gap detection, and frequency breakdown
+
+See [`examples/README.md`](./examples/README.md) for more details and instructions.
+
+---
+
+## Performance
+
+<!-- BENCH:START -->
+
+| Dataset Size | Pattern Chain (ms) | Throughput (candles/sec) | Memory (MB) |
+| ------------ | ------------------ | ------------------------ | ----------- |
+| 1,000        | 2.7                | 370K                     | 0.6         |
+| 10,000       | 21.1               | 474K                     | 10.4        |
+| 100,000      | 227.1              | 440K                     | 47.7        |
+| 1,000,000    | 2436.9             | 410K                     | 891.8       |
+
+<!-- BENCH:END -->
+
+Measured on 2026-09-11 with `npm run bench:readme`, Node v24.21.0, Intel Core
+i7-9750H @ 2.60GHz, 16 GB RAM, macOS 26.6. Figures are single-run and
+machine-specific — treat them as an order of magnitude, not a guarantee.
+Regenerate with `npm run bench:readme`, and update this line when you do. Memory
+on the smallest dataset is below the resolution of `process.memoryUsage()`,
+hence `<0.1`.
+
+When calling multiple pattern functions on the same dataset, use `precomputeCandleProps` to avoid redundant work:
+
+```js
+const { hammer, doji, utils } = require("candlestick");
+
+const precomputed = utils.precomputeCandleProps(data);
+const hammers = hammer(precomputed);
+const dojis = doji(precomputed);
+```
+
+`patternChain` handles this internally — no manual call needed there.
+
+Run `npm run bench` for the full benchmark suite on your hardware.
+
+### Install footprint
+
+|                        | candlestick      |
+| ---------------------- | ---------------- |
+| Runtime dependencies   | 0 (0 transitive) |
+| Native build step      | none             |
+| Install scripts        | none             |
+| Platform-specific code | none             |
+
+No size is written into this section. The README ships inside the package, so
+a figure printed here changes the number it reports — two earlier attempts were
+both stale by the time they were committed. The install-size badge at the top
+carries it instead, read from npm's own `dist.unpackedSize` for whatever version
+is current, so it cannot go out of date. `npm pack --dry-run` gives the exact
+size at any commit.
+
+The rows above are the part that actually affects whether an install succeeds.
+
+For a browser bundle, named ESM imports tree-shake: the entry names each export
+against its own module, so a bundler can drop what you do not import. Measured
+with esbuild, minified and gzipped, `import { hammer }` is **1.5 kB** against
+**8.1 kB** for the whole library. Importing the default export pulls everything
+in, by definition.
+
+The comparison that matters for install cost is the dependency tree, not the
+kilobytes: libraries in this space that bind to TA-Lib or Tulip ship a native
+addon and compile on install, which is where cross-platform CI breaks. This one
+is plain JavaScript end to end.
+
+---
+
+## Development
+
+```bash
+npm test              # run tests
+npm run test:watch    # watch mode
+npm run coverage      # coverage report (c8)
+npm run lint          # eslint
+npm run format        # prettier
+npm run bench         # benchmark suite
+```
+
+---
+
+## Architecture
+
+See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for an overview of the library's design and module structure.
+
+---
+
+## Contributing
+
+- Please open [issues](https://github.com/cm45t3r/candlestick/issues) or [pull requests](https://github.com/cm45t3r/candlestick/pulls) for bugs, features, or questions.
+- Add tests for new patterns or utilities.
+- Follow the code style enforced by ESLint and Prettier.
+- Run `npm run lint` and `npm run format` before submitting.
+- See [CONTRIBUTING.md](./CONTRIBUTING.md) for full guidelines.
+
+### Adding a New Pattern
+
+1. Create `src/myPattern.js` with a boolean detector (`isMyPattern`) and an array scanner (`myPattern`)
+2. Export both from `src/candlestick.js` and `src/index.mjs`
+3. Add TypeScript definitions in `types/index.d.ts`
+4. Register the pattern in `allPatterns` inside `src/patternChain.js` (set `paramCount` to the number of candles)
+5. Write tests in `test/myPattern.test.js` covering valid matches, non-matches, and edge cases
+6. Add an example file in `examples/myPattern.js`
+7. Run `npm test && npm run lint` to verify
+
+---
+
+## Upgrading to v3.0
+
+v3.0.0 is a breaking release. Three changes need attention, all of them in the
+CLI or the runtime requirement — **the library API is unchanged**. Every pattern
+function, export, type and the streaming and plugin surfaces behave exactly as
+they did in 2.x.
+
+1. **Node.js >= 22 required.** Node 20 reached end of life on 2026-04-30 and no
+   longer receives fixes, including security fixes. `npm install` now refuses
+   Node 20. Update your runtime and CI matrix.
+
+2. **The CLI rejects unknown options.** `candlestick --bogus -i data.json` used
+   to exit 0 with `--bogus` silently ignored; it now exits 1 with
+   `Unknown option: --bogus`. If a script passes a flag this CLI does not know,
+   it will start failing — which is the point, since the flag was never doing
+   anything.
+
+   The same pass made missing option values an error rather than a mis-parse:
+   `-i -o csv` used to read a file named `-o` and drop `-o csv` entirely, and
+   `-p` with no value reported zero patterns with exit 0. Both are now
+   diagnosed.
+
+3. **`Unsupported file format` is gone.** A `.json` or `.csv` extension still
+   picks the parser, but stdin, extensionless files and unrecognised extensions
+   are now detected from their content, so piping CSV works. A file that cannot
+   be parsed reports which format was tried instead. If you match on that error
+   string, match on the new one.
+
+Two additions that break nothing: a bare path is accepted as the input
+(`candlestick data.json`, equivalent to `-i`), and named ESM imports now
+tree-shake.
+
+---
+
+## Upgrading to v2.1
+
+v2.1.0 fixes three streaming defects. The fixes are behavioural, so code that
+relied on the broken behaviour will see a difference:
+
+1. **`totalProcessed` no longer double-counts the chunk overlap.** The summary
+   from `end()` now equals the exact number of candles passed to `process()`.
+   Previously it was inflated by `maxPatternSize - 1` per chunk boundary. If you
+   assert on this value, update the expected number.
+
+2. **`end()` is idempotent, and `process()` after `end()` throws.** Repeat
+   `end()` calls return the same summary without re-emitting matches or firing
+   `onProgress({ complete: true })` again. Draining the buffer means a later
+   `process()` would resume without the carry-over candles and silently miss
+   patterns spanning that boundary, so it raises
+   `Cannot process() after end(); call reset() to reuse this stream`. Call
+   `reset()` to reuse a stream.
+
+3. **`chunkSize` below the longest active pattern is rejected.** Such values
+   previously hung `process()` in an infinite loop or silently dropped candles
+   and produced negative indices. `chunkSize` is the internal buffer threshold,
+   not a limit on what you hand to `process()` — feeding one candle at a time
+   works at any valid `chunkSize`, so the usual fix is to remove the option and
+   take the default.
+
+Nothing changes for streams using the default `chunkSize` that call `end()`
+once, and no API signatures changed.
+
+---
+
+## Upgrading from v1.x
+
+v2.0.0 is a breaking release. Required changes:
+
+1. **Node.js >= 20 required.** Node 18 reached EOL on 2025-04-30 and is no longer supported. Update your runtime and CI matrix.
+
+2. **Error cause chain in `validateOHLCArray`.** Re-thrown errors now include `{ cause: originalError }`. If you inspect error objects (e.g., `error instanceof` checks or `error.message` parsing), be aware that the original error is now available via `error.cause`.
+
+No API changes — all pattern functions, exports, and types remain the same.
+
+---
+
+## FAQ
+
+**Q: Why is my pattern not detected?**
+
+Ensure your candle objects have all required fields (`open`, `high`, `low`, `close`). Check that the pattern's technical thresholds are met (see [Pattern Descriptions](#pattern-descriptions)). The library does not check for trend context (e.g., uptrend/downtrend) — it only looks at candle shapes.
+
+**Q: Does this work in the browser?**
+
+The core library is pure JavaScript with no Node.js-specific APIs, so it works in any bundler (webpack, Vite, esbuild, etc.). The `candlestick/cli` subpath is Node-only and is excluded from browser builds automatically via the `"node"` export condition.
+
+**Q: Does this library mutate my data?**
+
+No. All computations are done on copies; your input data is never changed.
+
+**Q: Can I use this with TypeScript?**
+
+Yes. The library includes complete TypeScript definitions in `types/index.d.ts`. Full type safety and IntelliSense support available.
+
+**Q: How do I add a custom pattern?**
+
+Use the plugin system — call `plugins.registerPattern()` with your detection function, then pass it to `patternChain`. See the [Plugin System](#plugin-system) example or [docs/PLUGIN_API.md](./docs/PLUGIN_API.md).
+
+**Q: What's the performance with 1M candles?**
+
+See the [Performance](#performance) table for current numbers. Run `npm run bench` to measure on your own hardware.
+
+**Q: Are there visual examples of patterns?**
+
+Not yet, but this is planned (see [ROADMAP.md](./docs/ROADMAP.md)). For now, see the [Pattern Descriptions](#pattern-descriptions) section.
+
+---
+
+## Further Reading
+
+[**The Hammer and the Hanging Man Are the Same Candle**](https://cm45t3r.github.io/candlestick/blog/the-hammer-and-the-hanging-man/?utm_source=readme&utm_medium=repo&utm_campaign=candlestick) — why two
+patterns with identical geometry mean opposite things, what a static confidence score
+gets wrong, and how the trend-context scoring in this library works. Also covers the
+streaming memory measurements and where the savings actually come from.
+
+More at [cm45t3r.github.io/candlestick](https://cm45t3r.github.io/candlestick/?utm_source=readme&utm_medium=repo&utm_campaign=candlestick).
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for full release history.
+
+---
+
+## Roadmap
+
+See [ROADMAP.md](./docs/ROADMAP.md) for planned features and future directions.
+
+---
+
+## Code of Conduct
+
+See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for community standards and enforcement.
+
+---
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

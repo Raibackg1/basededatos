@@ -1,0 +1,16 @@
+Source: yfinance-ta-patterns
+Section: python
+Priority: optional
+Maintainer: eminsk <M_N_N@tut.by>
+Build-Depends: debhelper-compat (= 13), dh-python, pybuild-plugin-pyproject, python3-all, python3-setuptools, python3-wheel
+Standards-Version: 4.6.2
+Homepage: https://github.com/eminsk/yfinance-ta-patterns
+Rules-Requires-Root: no
+
+Package: python3-yfinance-ta-patterns
+Architecture: all
+Depends: ${misc:Depends}, ${python3:Depends}, python3-pandas, python3-numpy, python3-rich, python3-tz
+Suggests: python3-yfinance
+Description: Institutional-grade market candlestick pattern scanner
+ Institutional-grade market candlestick pattern scanner with multi-asset
+ backtesting, AI confluence scoring, and LLM market intelligence.

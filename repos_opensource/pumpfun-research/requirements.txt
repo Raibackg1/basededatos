@@ -1,0 +1,7 @@
+requests
+pandas
+tqdm
+tenacity
+python-dateutil
+scipy
+python-dotenv

@@ -1,0 +1,106 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "benchmark.js"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "benchmark.js"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create gh-pages branch if missing
+        run: |
+          if ! git ls-remote --exit-code origin gh-pages > /dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git switch --orphan gh-pages
+            git commit --allow-empty -m "Initialize gh-pages for benchmark data"
+            git push origin gh-pages
+            git switch "$GITHUB_REF_NAME"
+          fi
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.x
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Run benchmark
+        run: |
+          node benchmark.js --json bench-results-full.json
+          node -e "const d=require('./bench-results-full.json'); require('fs').writeFileSync('bench-results.json', JSON.stringify(d.entries, null, 2))"
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: "customSmallerIsBetter"
+          output-file-path: bench-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          alert-threshold: "150%"
+          comment-on-alert: true
+          comment-always: true
+          fail-on-alert: false
+          alert-comment-cc-users: "@cm45t3r"
+          benchmark-data-dir-path: dev/bench
+
+      - name: Add friendly benchmark status comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          CURRENT_SHA="${{ github.event.pull_request.head.sha }}"
+
+          HAD_ALERT_THIS_RUN=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --jq "[.[] | select(.body | startswith(\"<!-- github-benchmark-action-comment(start): Benchmark Alert -->\")) | select(.body | contains(\"Current: $CURRENT_SHA\"))] | length > 0")
+
+          gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --jq '[.[] | select(.body | startswith("<!-- github-benchmark-action-comment(start): Benchmark Summary -->"))][-1].body // empty' \
+            | sed '/^<!-- github-benchmark-action-comment/d' > /tmp/table.md
+
+          MARKER="<!-- benchmark-status-comment -->"
+          if [ "$HAD_ALERT_THIS_RUN" = "true" ]; then
+            {
+              echo "$MARKER"
+              echo ":warning: **Performance regression detected in this run** — see the Alert comment above for details."
+              echo ""
+              cat /tmp/table.md
+            } > /tmp/status_body.md
+          else
+            {
+              echo "$MARKER"
+              echo ":white_check_mark: **Good job — no unexpected performance regressions in this run.**"
+              echo ""
+              cat /tmp/table.md
+            } > /tmp/status_body.md
+          fi
+
+          COMMENT_ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '[.[] | select(.body | startswith("<!-- benchmark-status-comment -->"))][-1].id // empty')
+
+          if [ -z "$COMMENT_ID" ]; then
+            gh api "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@/tmp/status_body.md
+          else
+            gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" -F body=@/tmp/status_body.md
+          fi
