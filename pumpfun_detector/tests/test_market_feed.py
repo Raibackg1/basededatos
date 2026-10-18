@@ -216,5 +216,241 @@ class TestScreenTokensWithFeed(unittest.TestCase):
         self.assertGreater(len(recs), 0)
 
 
+class TestBridgeAntiFalacias(unittest.TestCase):
+    """P1 — anti-falacias en gmgn_bridge: `N/D` honesto en vivo, demo solo explícito.
+
+    Ley (§1.5): si una fuente no responde se reporta el estado sin conexión;
+    jamás se fabrican métricas, PnL ni juicios de seguridad con literales.
+    """
+
+    # ---- "A quién seguir" -------------------------------------------------
+
+    def test_rank_wallets_production_fail_closed_without_source(self):
+        """Sin GMGN CLI, sin DB de wallets y sin demo: lista vacía, no catálogo inventado."""
+        bridge = GMGNBridge(cli_path="__missing__", feed=None, demo_mode=False)
+        self.assertEqual(bridge.rank_wallets_to_follow(), [])
+
+    def test_rank_wallets_demo_catalog_is_explicit_demo_only(self):
+        """El catálogo de demostración existe SOLO cuando demo_mode está activo."""
+        bridge = GMGNBridge(cli_path="__missing__", feed=None, demo_mode=True)
+        wallets = bridge.rank_wallets_to_follow()
+        verdicts = {w.verdict for w in wallets}
+        self.assertGreater(len(wallets), 0)
+        self.assertIn("FOLLOW", verdicts)
+        self.assertIn("AVOID", verdicts)
+
+    def test_db_wallets_do_not_invent_pnl_30d_or_holding(self):
+        """WalletProfile real solo expone balance/cierres/wins: nada más se inventa."""
+        import sqlite3
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "custom.db")
+            con = sqlite3.connect(db)
+            con.execute(
+                "CREATE TABLE WalletProfile (id TEXT, label TEXT, solBalance REAL, "
+                "closedTrades INTEGER, wins INTEGER)"
+            )
+            con.execute("INSERT INTO WalletProfile VALUES ('AdDr1', 'Ballena Prueba', 12.5, 10, 6)")
+            con.commit()
+            con.close()
+            with mock.patch.dict(os.environ, {"PUMPSCOPE_DB": db}):
+                bridge = GMGNBridge(cli_path="__missing__", feed=None, demo_mode=False)
+                wallets = bridge.rank_wallets_to_follow()
+
+        self.assertEqual(len(wallets), 1)
+        w = wallets[0]
+        self.assertAlmostEqual(w.winrate_7d, 0.6)
+        self.assertEqual(w.total_trades, 10)          # sin floor artificial max(trades, 5)
+        self.assertIsNone(w.winrate_30d)              # sin wr * 0.95
+        self.assertIsNone(w.realized_pnl_usd)         # sin solBalance * 150
+        self.assertIsNone(w.avg_holding_time_s)       # sin 2490/134 fabricados
+        self.assertIsNone(w.is_copyable)              # sin evidencia no hay juicio
+        self.assertEqual(w.verdict, "WATCH")
+        self.assertIn("incomplet", w.reason.lower())
+
+    # ---- "Qué token comprar" ----------------------------------------------
+
+    def test_metrics_less_tokens_schema_never_fabricates(self):
+        """Esquema `tokens` sin métricas on-chain: fail-closed, no candidatos inventados."""
+        import sqlite3
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "custom.db")
+            con = sqlite3.connect(db)
+            con.execute(
+                "CREATE TABLE tokens (mint TEXT, symbol TEXT, name TEXT, "
+                "total_supply REAL, created_at TEXT, dev_wallet TEXT)"
+            )
+            con.execute("INSERT INTO tokens VALUES ('MINTDEMO1', 'DEMO', 'Demo', 1000.0, '2024-01-01', 'd1')")
+            con.commit()
+            con.close()
+            with mock.patch.dict(os.environ, {"PUMPSCOPE_DB": db}):
+                bridge = GMGNBridge(cli_path="__missing__", feed=None, demo_mode=False,
+                                    use_db_fallback=True)
+                recs = bridge.screen_tokens_to_buy(max_tokens=5)
+
+        self.assertEqual(recs, [])
+        self.assertIsNone(bridge.last_screen_source)
+
+    def test_token_schema_uses_measured_values_only(self):
+        """Tabla `Token` real: valores medidos; filas sin métricas críticas → no verificadas."""
+        import sqlite3
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "custom.db")
+            con = sqlite3.connect(db)
+            con.execute(
+                "CREATE TABLE Token (mint TEXT, symbol TEXT, name TEXT, marketCap REAL, "
+                "firstMarketCap REAL, firstLiquidity REAL, liquidity REAL, devBalancePct REAL, "
+                "top10HoldersPct REAL, bundlerHoldingPct REAL, changeM5 REAL, volume24h REAL, "
+                "holderCount INTEGER, firstSeenAt REAL)"
+            )
+            con.execute(
+                "INSERT INTO Token VALUES ('MINTREAL1', 'REALX', 'Real X', 9000.0, 8000.0, 2000.0, "
+                "2500.0, 0.5, 18.0, 6.0, 4.0, 28800.0, 42, 1000.0)"
+            )
+            con.execute(
+                "INSERT INTO Token VALUES ('MINTNULL1', 'NULLY', 'Null Y', 7000.0, 7000.0, 1500.0, "
+                "1600.0, 0.4, NULL, 5.0, 2.0, 14400.0, NULL, 999.0)"
+            )
+            con.commit()
+            con.close()
+            with mock.patch.dict(os.environ, {"PUMPSCOPE_DB": db}):
+                bridge = GMGNBridge(cli_path="__missing__", feed=None, demo_mode=False,
+                                    use_db_fallback=True)
+                recs = bridge.screen_tokens_to_buy(max_tokens=5)
+
+        self.assertEqual(bridge.last_screen_source, "custom_db")
+        r1 = next(r for r in recs if r.mint == "MINTREAL1")
+        self.assertEqual(r1.market_cap_usd, 9000.0)
+        self.assertEqual(r1.liquidity_usd, 2500.0)
+        self.assertEqual(r1.top10_concentration_pct, 18.0)
+        self.assertEqual(r1.bundler_pct, 6.0)
+        self.assertTrue(r1.metrics_known)
+        self.assertEqual(r1.smart_buyers_count, 0)   # jamás "Ballena Verificada" sin detección
+        self.assertEqual(r1.smart_buyers_tags, [])
+        self.assertEqual(r1.sparkline, [])           # sin serie sintética
+
+        r2 = next(r for r in recs if r.mint == "MINTNULL1")
+        self.assertFalse(r2.metrics_known)           # top10 NULL -> no verificable
+        self.assertEqual(r2.verdict, "VETO")
+
+    # ---- Auditoría forense ------------------------------------------------
+
+    def test_audit_token_without_data_is_fail_closed(self):
+        """Sin CLI y sin escáner: UNVERIFIED, sin literales sustitutivos (nunca PASS falso)."""
+        from unittest import mock
+
+        bridge = GMGNBridge(cli_path="__missing__", feed=None, demo_mode=False)
+        with mock.patch.object(bridge.dossier_scanner, "scan_token_live",
+                               side_effect=RuntimeError("sin red")):
+            res = bridge.audit_token("SoL1111111111111111111111111111111111111112")
+
+        self.assertFalse(res["is_safe"])
+        self.assertEqual(res["verdict"], "UNVERIFIED")
+        self.assertFalse(res["metrics_known"])
+        self.assertIsNone(res["rug_ratio"])
+        self.assertIsNone(res["top10_concentration_pct"])
+        self.assertIsNone(res["dev_holding_pct"])
+        self.assertIsNone(res["sniper_pct"])
+        self.assertEqual(res["veto_flags"], [])
+        self.assertEqual(res["pattern"]["pattern_id"], "UNVERIFIED_METRICS")
+
+    def test_audit_token_dossier_never_invents_metrics(self):
+        """Dossier real: PASS solo con métricas completas; faltante -> UNVERIFIED parcial."""
+        from unittest import mock
+
+        class _Dossier:
+            metrics_known = True
+            admitted = True
+
+            def __init__(self, top10):
+                self._top10 = top10
+
+            def to_dict(self):
+                return {
+                    "composite_dd_score": 80.0, "top10_float_pct": self._top10,
+                    "dev_balance_pct": 0.5, "bundler_pct": 3.0, "sniper_pct": 4.0,
+                    "market_cap_usd": None, "liquidity_usd": None, "admitted": True,
+                    "bundler_flag": False, "wash_trading_flag": False,
+                    "clone_factory_flag": False,
+                }
+
+        bridge = GMGNBridge(cli_path="__missing__", feed=None, demo_mode=False)
+        with mock.patch.object(bridge.dossier_scanner, "scan_token_live",
+                               return_value=_Dossier(12.0)):
+            ok = bridge.audit_token("SoL1111111111111111111111111111111111111112")
+        self.assertTrue(ok["metrics_known"])
+        self.assertTrue(ok["is_safe"])
+        self.assertEqual(ok["verdict"], "PASS")
+        self.assertAlmostEqual(ok["rug_ratio"], 0.2)
+
+        with mock.patch.object(bridge.dossier_scanner, "scan_token_live",
+                               return_value=_Dossier(None)):
+            partial = bridge.audit_token("SoL1111111111111111111111111111111111111112")
+        self.assertFalse(partial["metrics_known"])
+        self.assertFalse(partial["is_safe"])
+        self.assertEqual(partial["verdict"], "UNVERIFIED")
+        self.assertEqual(partial["pattern"]["pattern_id"], "UNVERIFIED_METRICS")
+        self.assertIsNone(partial["top10_concentration_pct"])
+
+    # ---- Trazas y lock estático -------------------------------------------
+
+    def test_build_decision_stages_marks_missing_values_as_nd(self):
+        """E0/E4b con dato ausente: `value=None` y 'N/D' — nunca $0/0.0% fingidos."""
+        from detector.gmgn_bridge import build_decision_stages
+
+        stages = build_decision_stages(
+            source="", mint="MINTX", symbol="SHOW", mc_usd=None, liq_usd=None,
+            metrics_known=False, bundler_pct=0.0, wash_trading_flag=False,
+            clone_factory_flag=False, dev_factory_flag=False, dev_balance_pct=0.0,
+            top10_pct=0.0,
+            ml_eval={
+                "pattern_id": "UNVERIFIED_SECURITY_TRAP", "admitted": False,
+                "verdict": "VETO", "veto_reason": "VETO_UNVERIFIED_METRICS",
+                "probability_success": None, "confluence_score": None,
+                "expected_ev": "N/D", "ev_fraction": None,
+            },
+        )
+        by_stage = {s["stage"]: s for s in stages}
+        self.assertIsNone(by_stage["E0_discovery"]["value"])
+        self.assertIn("N/D", by_stage["E0_discovery"]["reason"])
+        self.assertIsNone(by_stage["E4_ml_probability"]["value"])
+        self.assertIn("N/D", by_stage["E4_ml_probability"]["reason"])
+
+    def test_static_source_lock_forbids_reintroducing_fabricated_literals(self):
+        """Lock estático: los literales sustitutivos erradicados no deben volver."""
+        src_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "detector", "gmgn_bridge.py")
+        with open(src_path, "r", encoding="utf-8") as fh:
+            src = fh.read()
+
+        forbidden = [
+            '"market_cap_usd": 6800.0',
+            '"liquidity_usd": 2100.0',
+            '"top10_concentration_pct": 21.5',
+            '"smart_buyers_count": 2 if top10 < 30',
+            "or 15000.0",
+            "or 4500.0",
+            "sol_bal * 150.0",
+            "wr * 0.95",
+            "max(trades, 5)",
+            "vol5m / 10.0",
+            "[10, 11, 10.5, 12, 11.8, 13]",
+        ]
+        for frag in forbidden:
+            self.assertNotIn(frag, src, f"literal fabricado reintroducido: {frag}")
+
+        # El catálogo demo permanece, pero SOLO bajo demo_mode explícito.
+        self.assertIn("if not raw_wallets and self.demo_mode:", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

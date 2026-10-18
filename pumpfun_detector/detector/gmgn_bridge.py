@@ -52,12 +52,12 @@ class PatternDetection:
 class SmartWalletProfile:
     address: str
     tag: str
-    winrate_7d: float
-    winrate_30d: float
-    realized_pnl_usd: float
-    total_trades: int
-    avg_holding_time_s: float
-    is_copyable: bool
+    winrate_7d: Optional[float]
+    winrate_30d: Optional[float]
+    realized_pnl_usd: Optional[float]
+    total_trades: Optional[int]
+    avg_holding_time_s: Optional[float]
+    is_copyable: Optional[bool]
     verdict: str  # "FOLLOW", "WATCH", "AVOID"
     reason: str
 
@@ -162,9 +162,9 @@ def build_decision_stages(
     ``stage, value, threshold, operator, verdict(pass|fail|skip|info), reason,
     source, source_kind``.
     """
-    mc_usd = _stage_float(mc_usd) or 0.0
-    liq_usd = _stage_float(liq_usd) or 0.0
-    liq_ratio = liq_usd / max(mc_usd, 1.0)
+    mc_usd = _stage_float(mc_usd)
+    liq_usd = _stage_float(liq_usd)
+    liq_ratio = (liq_usd / max(mc_usd, 1.0)) if (mc_usd is not None and liq_usd is not None) else None
     ml_eval = ml_eval or {}
 
     # Umbrales EFECTIVOS (los devuelve predict_token) + procedencia por regla.
@@ -198,9 +198,12 @@ def build_decision_stages(
             "source": src, "source_kind": kind,
         }
 
+    mc_txt = f"MC ${mc_usd:,.0f}" if mc_usd is not None else "MC N/D"
+    liq_txt = f"liq ${liq_usd:,.0f}" if liq_usd is not None else "liq N/D"
+    ratio_txt = f" · ratio {liq_ratio * 100:.1f}%" if liq_ratio is not None else ""
     stages: List[Dict[str, Any]] = [
-        _mk("E0_discovery", round(mc_usd, 2), None, None, "info",
-            f"{symbol or mint} · MC ${mc_usd:,.0f} · liq ${liq_usd:,.0f} · ratio {liq_ratio*100:.1f}%",
+        _mk("E0_discovery", round(mc_usd, 2) if mc_usd is not None else None, None, None, "info",
+            f"{symbol or mint} · {mc_txt} · {liq_txt}{ratio_txt}",
             str(source or "desconocido"), "feed")
     ]
 
@@ -217,16 +220,16 @@ def build_decision_stages(
 
     # E3 — cadena de escudos forenses (orden real; despues del primer fail → skip)
     values = {
-        "E3_bundler": (round(_stage_float(bundler_pct) or 0.0, 2),
+        "E3_bundler": (_stage_float(bundler_pct),
                        _used_thr("max_bundler_pct", 20.0), "<=", "max_bundler_pct"),
         "E3_dev_factory": (1.0 if dev_factory_flag else 0.0, 0.0, "==", None),
         "E3_wash_trading": (1.0 if wash_trading_flag else 0.0, 0.0, "==", None),
         "E3_clone_factory": (1.0 if clone_factory_flag else 0.0, 0.0, "==", None),
-        "E3_dev_holding": (round(_stage_float(dev_balance_pct) or 0.0, 2),
+        "E3_dev_holding": (_stage_float(dev_balance_pct),
                            _used_thr("max_dev_balance_pct", 1.5), "<=", "max_dev_balance_pct"),
-        "E3_cabal_top10": (round(_stage_float(top10_pct) or 0.0, 2),
+        "E3_cabal_top10": (_stage_float(top10_pct),
                            _used_thr("max_top10_pct", 30.0), "<=", "max_top10_pct"),
-        "E3_liquidity_ratio": (round(liq_ratio, 4),
+        "E3_liquidity_ratio": (round(liq_ratio, 4) if liq_ratio is not None else None,
                                _used_thr("min_liq_ratio", 0.15), ">=", "min_liq_ratio"),
     }
     after_fail = fail_stage == "E1_metrics_known"
@@ -240,6 +243,9 @@ def build_decision_stages(
             stages.append(_mk(stage_name, value, threshold, operator, "fail",
                               str(ml_eval.get("veto_reason") or label), src, kind))
             after_fail = True
+        elif value is None:
+            stages.append(_mk(stage_name, None, threshold, operator, "info",
+                              f"{label}: sin dato (no evaluado)", src, kind))
         else:
             stages.append(_mk(stage_name, value, threshold, operator, "pass",
                               f"{label}: {value} {operator} {threshold} (OK)", src, kind))
@@ -260,8 +266,9 @@ def build_decision_stages(
 
     # E4b — probabilidad ML (informativa: define arquetipo, no admite sola)
     prob = _stage_float(ml_eval.get("probability_success"))
+    prob_txt = f"{prob * 100:.1f}%" if prob is not None else "N/D"
     stages.append(_mk("E4_ml_probability", prob, 0.65, ">=", "info",
-                      f"P(éxito) {(prob or 0.0)*100:.1f}% · arquetipo {pattern_id} "
+                      f"P(éxito) {prob_txt} · arquetipo {pattern_id} "
                       f"({ml_eval.get('pattern_label', '')}); fuerte ≥65%, especulativo ≥50%",
                       "modelo:HistGradientBoosting", "model"))
 
@@ -739,21 +746,17 @@ class GMGNBridge:
                     con.close()
                     wallets = []
                     for r in rows:
-                        trades = int(r[3] or 0)
-                        wins = int(r[4] or 0)
-                        wr = (wins / trades) if trades > 0 else 0.0
-                        sol_bal = float(r[2] or 0.0)
-                        pnl = sol_bal * 150.0
+                        trades = int(r[3]) if r[3] is not None else None
+                        wins = int(r[4]) if r[4] is not None else None
                         label = str(r[1] or "Trader")
-                        hold_time = 2490.0 if "Ballena" in label else 134.0
+                        # El esquema solo expone balance/cierres/ganancias: PnL USD,
+                        # WR 30d y holding medio NO son medibles aquí (anti-falacias:
+                        # sin dato -> None, jamás un literal sustitutivo).
                         wallets.append({
                             "address": str(r[0]),
                             "tag": label,
-                            "winrate_7d": round(wr, 3),
-                            "winrate_30d": round(wr * 0.95, 3),
-                            "realized_pnl_usd": round(pnl, 2),
-                            "total_trades": max(trades, 5),
-                            "avg_holding_time_s": hold_time,
+                            "winrate_7d": round(wins / trades, 3) if (trades and wins is not None) else None,
+                            "total_trades": trades,
                         })
                     if wallets:
                         return wallets
@@ -779,8 +782,9 @@ class GMGNBridge:
         if not raw_wallets:
             raw_wallets = self._load_wallets_from_db()
 
-        # Si aún no hay carteras (ej. entorno de tests unitarios aislados), catálogo canónico auditado
-        if not raw_wallets:
+        # Catálogo de DEMOSTRACIÓN: solo con demo_mode explícito (tests/offline).
+        # En vivo (demo_mode=False) la respuesta honesta es [] — jamás un catálogo inventado.
+        if not raw_wallets and self.demo_mode:
             raw_wallets = [
                 {
                     "address": "4DdrfiDHpmx55i4SPssxVzS9ZaKLb8qr45NKY9Er9nNh",
@@ -842,28 +846,42 @@ class GMGNBridge:
         for w in raw_wallets:
             addr = w.get("address", "unknown")
             tag = w.get("tag", "trader")
-            wr7 = float(w.get("winrate_7d", 0.0))
-            wr30 = float(w.get("winrate_30d", 0.0))
-            pnl = float(w.get("realized_pnl_usd", 0.0))
-            trades = int(w.get("total_trades", 0))
-            hold_time = float(w.get("avg_holding_time_s", 60.0))
+            wr7 = _stage_float(w.get("winrate_7d"))
+            wr30 = _stage_float(w.get("winrate_30d"))
+            pnl = _stage_float(w.get("realized_pnl_usd"))
+            trades_raw = w.get("total_trades")
+            trades = int(trades_raw) if isinstance(trades_raw, (int, float)) and not isinstance(trades_raw, bool) else None
+            hold_time = _stage_float(w.get("avg_holding_time_s"))
 
-            if hold_time < 5.0:
+            missing = [name for name, val in (
+                ("WR 7D", wr7), ("WR 30D", wr30), ("PnL USD", pnl),
+                ("nº trades", trades), ("holding medio", hold_time)) if val is None]
+
+            if hold_time is not None and hold_time < 5.0:
                 is_copyable = False
                 verdict = "AVOID"
                 reason = "Bot MEV / Bloque 0: holding medio < 5s. Pérdida segura por slippage de seguimiento."
-            elif wr7 >= min_winrate and pnl > 0 and trades >= 5:
+            elif (wr7 is not None and wr7 >= min_winrate and pnl is not None and pnl > 0
+                  and trades is not None and trades >= 5 and hold_time is not None):
                 is_copyable = True
                 verdict = "FOLLOW"
                 reason = f"WR 7D {wr7*100:.1f}%, PnL ${pnl:,.0f}, holding {hold_time/60:.1f}m. Conduce a EV positivo."
-            elif wr30 >= min_winrate and pnl > 0:
+            elif wr30 is not None and wr30 >= min_winrate and pnl is not None and pnl > 0:
                 is_copyable = True
                 verdict = "WATCH"
                 reason = "Consistente a 30 días; verificando cadencia semanal."
+            elif wr7 is not None and pnl is not None and wr7 < min_winrate and pnl <= 0:
+                is_copyable = False
+                verdict = "AVOID"
+                reason = f"EV desfavorable: WR 7D {wr7*100:.1f}% < {min_winrate*100:.0f}% y PnL ${pnl:,.0f}."
+            elif missing:
+                is_copyable = None
+                verdict = "WATCH"
+                reason = "Datos incompletos en la fuente (sin dato: " + ", ".join(missing) + ")."
             else:
                 is_copyable = False
                 verdict = "AVOID"
-                reason = f"EV desfavorable: WR {wr7*100:.1f}% o PnL negativo."
+                reason = "EV desfavorable con los datos disponibles (WR 7D / PnL / muestra no cumplen el listón)."
 
             results.append(
                 SmartWalletProfile(
@@ -883,7 +901,7 @@ class GMGNBridge:
         results.sort(
             key=lambda x: (
                 1 if x.verdict == "FOLLOW" else (0 if x.verdict == "WATCH" else -1),
-                x.realized_pnl_usd,
+                x.realized_pnl_usd if x.realized_pnl_usd is not None else float("-inf"),
             ),
             reverse=True,
         )
@@ -948,16 +966,24 @@ class GMGNBridge:
                     rows = cur.execute(query, (max_tokens,)).fetchall()
                     con.close()
                     candidates = []
+                    skipped = 0
                     for r in rows:
-                        fmc = float(r["firstMarketCap"] or r["marketCap"] or 1000.0)
-                        fliq = float(r["firstLiquidity"] or r["liquidity"] or 500.0)
-                        mc = float(r["marketCap"] or fmc)
-                        liq = float(r["liquidity"] or fliq)
-                        dev = float(r["devBalancePct"] or 0.0)
-                        top10 = float(r["top10HoldersPct"] or 20.0)
-                        chg5m = float(r["changeM5"] or 0.0)
-                        vol24h = float(r["volume24h"] or 0.0)
-                        spark = [round(mc * (1.0 + (i - 5) * 0.02 + (chg5m/100.0) * (i/10.0)), 1) for i in range(10)]
+                        # Solo valores medidos; sin métricas de entrada verificables la
+                        # fila se omite (anti-falacias §1.5: jamás fabricar).
+                        fmc = _stage_float(r["firstMarketCap"]) or _stage_float(r["marketCap"])
+                        fliq = _stage_float(r["firstLiquidity"]) or _stage_float(r["liquidity"])
+                        if fmc is None or fliq is None:
+                            skipped += 1
+                            continue
+                        mc = _stage_float(r["marketCap"]) or fmc
+                        liq = _stage_float(r["liquidity"]) or fliq
+                        dev = _stage_float(r["devBalancePct"])
+                        top10 = _stage_float(r["top10HoldersPct"])
+                        bundler = _stage_float(r["bundlerHoldingPct"])
+                        holder = int(r["holderCount"]) if r["holderCount"] is not None else 0
+                        chg5m = _stage_float(r["changeM5"]) or 0.0
+                        vol24h = _stage_float(r["volume24h"]) or 0.0
+                        metrics_known = dev is not None and top10 is not None and bundler is not None
                         candidates.append({
                             "mint": str(r["mint"]),
                             "symbol": str(r["symbol"] or "N/A"),
@@ -966,54 +992,32 @@ class GMGNBridge:
                             "liquidity_usd": round(liq, 2),
                             "first_market_cap": round(fmc, 2),
                             "first_liquidity": round(fliq, 2),
-                            "smart_buyers_count": 2 if top10 < 30 and dev < 1.0 else 0,
-                            "smart_buyers_tags": ["Ballena Verificada"] if top10 < 30 else [],
-                            "rug_ratio": round(min(dev / 10.0 + top10 / 100.0, 0.95), 2),
-                            "top10_concentration_pct": round(top10, 1),
-                            "dev_balance_pct": round(dev, 2),
-                            "sniper_ratio_pct": round(float(r["bundlerHoldingPct"] or 0.0), 1),
+                            "smart_buyers_count": 0,   # este esquema no verifica smart money
+                            "smart_buyers_tags": [],
+                            "rug_ratio": 0.0,           # sin medición propia de rug en esta fuente
+                            "top10_concentration_pct": round(top10, 1) if top10 is not None else 0.0,
+                            "dev_balance_pct": round(dev, 2) if dev is not None else 0.0,
+                            "sniper_ratio_pct": round(bundler, 1) if bundler is not None else 0.0,
+                            "bundler_pct": round(bundler, 1) if bundler is not None else 0.0,
                             "price_change_5m": round(chg5m, 2),
                             "volume_5m_usd": round(vol24h / 288.0, 2),
-                            "sparkline": spark,
-                            "metrics_known": True,
+                            "sparkline": [],           # sin serie sintética
+                            "holder_count": holder,
+                            "metrics_known": metrics_known,
                         })
+                    if skipped:
+                        logger.info("Token: %d filas sin métricas de entrada omitidas (%s)",
+                                    skipped, db_path)
                     if candidates:
                         return candidates
                 elif "tokens" in tables:
-                    query = """
-                    SELECT mint, symbol, name, total_supply, created_at, dev_wallet
-                    FROM tokens
-                    ORDER BY rowid DESC
-                    LIMIT ?
-                    """
-                    rows = cur.execute(query, (max_tokens,)).fetchall()
+                    # Esquema sin métricas on-chain verificables (MC/liquidez/holders):
+                    # prohibido fabricarlas (§1.5). Fail-closed: no hay candidatos.
                     con.close()
-                    candidates = []
-                    for r in rows:
-                        mint = str(r["mint"])
-                        sym = str(r["symbol"] or "TOKEN")
-                        name = str(r["name"] or "Pump Token")
-                        candidates.append({
-                            "mint": mint,
-                            "symbol": sym,
-                            "name": name,
-                            "market_cap_usd": 6800.0,
-                            "liquidity_usd": 2100.0,
-                            "first_market_cap": 5000.0,
-                            "first_liquidity": 1600.0,
-                            "smart_buyers_count": 1,
-                            "smart_buyers_tags": ["Smart Money"],
-                            "rug_ratio": 0.12,
-                            "top10_concentration_pct": 21.5,
-                            "dev_balance_pct": 0.45,
-                            "sniper_ratio_pct": 8.5,
-                            "price_change_5m": 8.4,
-                            "volume_5m_usd": 1200.0,
-                            "sparkline": [5000, 5200, 5400, 5800, 6200, 6800],
-                            "metrics_known": True,
-                        })
-                    if candidates:
-                        return candidates
+                    logger.warning(
+                        "Esquema 'tokens' en %s sin métricas on-chain verificables: "
+                        "no se fabrican candidatos (§1.5).", db_path)
+                    continue
             except Exception as exc:
                 logger.warning("Error leyendo tokens de %s: %s", db_path, exc)
         return []
@@ -1162,13 +1166,13 @@ class GMGNBridge:
             sniper_pct = float(t.get("sniper_ratio_pct", 0.0))
             chg5m = float(t.get("price_change_5m", 0.0))
             vol5m = float(t.get("volume_5m_usd", 0.0))
-            spark = t.get("sparkline", [10, 11, 10.5, 12, 11.8, 13])
+            spark = t.get("sparkline") or []
             metrics_known = bool(t.get("metrics_known", True))
             bundler_pct = float(t.get("bundler_pct", sniper_pct if sniper_pct >= 25.0 else 0.0))
             wash_flag = bool(t.get("wash_trading_flag", False))
             clone_flag = bool(t.get("clone_factory_flag", False))
             dev_factory_flag = bool(t.get("dev_factory_flag", False))
-            avg_tx_m5 = float(t.get("avg_tx_m5_usd", round(vol5m / 10.0, 2) if vol5m > 0 else 0.0))
+            avg_tx_m5 = float(t.get("avg_tx_m5_usd") or 0.0)
             same_name_cnt = int(t.get("same_name_count", 1))
 
             # Umbrales adaptativos con puerta BP-003 (N≥30): si ninguna regla está
@@ -1188,10 +1192,10 @@ class GMGNBridge:
 
             # Evaluación Cuantitativa con Modelo de Machine Learning (HistGradientBoosting + Fail-Closed)
             ml_eval = self.quant_model.predict_token(
-                first_mc=float(t.get("first_market_cap", mc)),
-                first_liq=float(t.get("first_liquidity", liq)),
+                first_mc=_stage_float(t.get("first_market_cap")) or mc,
+                first_liq=_stage_float(t.get("first_liquidity")) or liq,
                 volume_24h=vol5m * 288.0,
-                holder_count=int(t.get("holder_count", 10)),
+                holder_count=int(t.get("holder_count") or 0),
                 dev_balance_pct=dev_pct,
                 top10_pct=top10,
                 metrics_known=metrics_known,
@@ -1346,36 +1350,88 @@ class GMGNBridge:
             except Exception as exc:
                 logger.debug("Fallback en audit_token scan_token_live: %s", exc)
 
+        mc_real, liq_real = 0.0, 0.0  # 0.0 = "sin dato" (marcador honesto, no literal de mercado)
         if dossier_dict:
-            rug_ratio = round(max(0.0, (100.0 - float(dossier_dict["composite_dd_score"])) / 100.0), 2)
-            top10 = float(dossier_dict["top10_float_pct"])
-            dev_holding = float(dossier_dict["dev_balance_pct"])
-            sniper_pct = float(dossier_dict["bundler_pct"] or dossier_dict["sniper_pct"])
-            mc = float(dossier_dict["market_cap_usd"] or 15000.0)
-            liq = float(dossier_dict["liquidity_usd"] or 4500.0)
+            composite = _stage_float(dossier_dict.get("composite_dd_score"))
+            rug_ratio = round(max(0.0, (100.0 - composite) / 100.0), 2) if composite is not None else None
+            top10 = _stage_float(dossier_dict.get("top10_float_pct"))
+            dev_holding = _stage_float(dossier_dict.get("dev_balance_pct"))
+            sniper_pct = _stage_float(dossier_dict.get("bundler_pct"))
+            if sniper_pct is None:
+                sniper_pct = _stage_float(dossier_dict.get("sniper_pct"))
+            mc_real = _stage_float(dossier_dict.get("market_cap_usd")) or 0.0
+            liq_real = _stage_float(dossier_dict.get("liquidity_usd")) or 0.0
+        elif sec_data:
+            rug_ratio = _stage_float(sec_data.get("rug_ratio"))
+            top10 = _stage_float(sec_data.get("top10_holder_pct"))
+            dev_holding = _stage_float(sec_data.get("dev_token_burn_pct"))
+            sniper_pct = _stage_float(sec_data.get("sniper_pct"))
         else:
-            rug_ratio = float(sec_data.get("rug_ratio", 0.15))
-            top10 = float(sec_data.get("top10_holder_pct", 22.0))
-            dev_holding = float(sec_data.get("dev_token_burn_pct", 0.5))
-            sniper_pct = float(sec_data.get("sniper_pct", 10.0))
-            mc, liq = 15000.0, 4500.0
+            # Fail-closed (§1.5): sin fuente verificable no se emite juicio de seguridad
+            # ni literales sustitutivos; el veredicto honesto es UNVERIFIED.
+            return {
+                "address": address,
+                "chain": chain,
+                "is_safe": False,
+                "verdict": "UNVERIFIED",
+                "metrics_known": False,
+                "rug_ratio": None,
+                "top10_concentration_pct": None,
+                "dev_holding_pct": None,
+                "sniper_pct": None,
+                "pattern": asdict(PatternDetection(
+                    pattern_id="UNVERIFIED_METRICS",
+                    label="⚠️ Métricas sin verificar (fail-closed)",
+                    confidence_pct=0.0,
+                    bias="NEUTRAL",
+                    expected_ev="N/D",
+                    causal_trigger="Sin fuente verificable (GMGN CLI no disponible y escaneo "
+                                   "multi-fuente sin métricas): no se emite veredicto de seguridad",
+                )),
+                "veto_flags": [],
+                "dossier": None,
+                "reason": "fail-closed: sin datos verificables no se emite juicio de seguridad",
+            }
 
-        pat = self.classify_pattern(1, rug_ratio, top10, dev_holding, sniper_pct, mc, liq)
-        is_safe = (
-            rug_ratio <= 0.30
-            and top10 <= 30.0
-            and dev_holding <= 1.50
-            and sniper_pct <= 25.0
-            and (dossier_dict is None or bool(dossier_dict.get("admitted")))
-        )
-        verdict = "PASS" if is_safe else "FAIL"
+        metrics_complete = all(v is not None for v in (rug_ratio, top10, dev_holding, sniper_pct))
+
+        if metrics_complete:
+            pat = self.classify_pattern(1, rug_ratio, top10, dev_holding, sniper_pct,
+                                        mc_real, liq_real)
+            is_safe = (
+                rug_ratio <= 0.30
+                and top10 <= 30.0
+                and dev_holding <= 1.50
+                and sniper_pct <= 25.0
+                and (dossier_dict is None or bool(dossier_dict.get("admitted")))
+            )
+            reason = ("métricas verificadas dentro de escudos" if is_safe
+                      else "veto: una o más métricas verificadas superan los escudos")
+        else:
+            missing_metrics = [
+                name for name, val in (
+                    ("rug_ratio", rug_ratio), ("top10", top10),
+                    ("dev_holding", dev_holding), ("snipers", sniper_pct)) if val is None
+            ]
+            pat = PatternDetection(
+                pattern_id="UNVERIFIED_METRICS",
+                label="⚠️ Métricas sin verificar (fail-closed)",
+                confidence_pct=0.0,
+                bias="NEUTRAL",
+                expected_ev="N/D",
+                causal_trigger="Métricas incompletas en la fuente: " + ", ".join(missing_metrics),
+            )
+            is_safe = False
+            reason = "métricas incompletas: " + ", ".join(missing_metrics)
+
+        verdict = "PASS" if is_safe else ("UNVERIFIED" if not metrics_complete else "FAIL")
 
         veto_flags = [
             f for f in [
-                "RUG_RATIO_CRITICAL" if rug_ratio > 0.30 else None,
-                "CABAL_CLUSTER_DOMINANCE" if top10 > 30.0 else None,
-                "DEV_INVENTORY_EXCESS" if dev_holding > 1.50 else None,
-                "SNIPER_OVERHANG" if sniper_pct > 25.0 else None,
+                "RUG_RATIO_CRITICAL" if (rug_ratio is not None and rug_ratio > 0.30) else None,
+                "CABAL_CLUSTER_DOMINANCE" if (top10 is not None and top10 > 30.0) else None,
+                "DEV_INVENTORY_EXCESS" if (dev_holding is not None and dev_holding > 1.50) else None,
+                "SNIPER_OVERHANG" if (sniper_pct is not None and sniper_pct > 25.0) else None,
                 "BUNDLER_UNIFORM_TRAP" if (dossier_dict and dossier_dict.get("bundler_flag")) else None,
                 "WASH_TRADING_STAIRCASE" if (dossier_dict and dossier_dict.get("wash_trading_flag")) else None,
                 "CLONE_FACTORY_VAMP" if (dossier_dict and dossier_dict.get("clone_factory_flag")) else None,
@@ -1387,6 +1443,7 @@ class GMGNBridge:
             "chain": chain,
             "is_safe": is_safe,
             "verdict": verdict,
+            "metrics_known": metrics_complete,
             "rug_ratio": rug_ratio,
             "top10_concentration_pct": top10,
             "dev_holding_pct": dev_holding,
@@ -1394,5 +1451,6 @@ class GMGNBridge:
             "pattern": asdict(pat),
             "veto_flags": veto_flags,
             "dossier": dossier_dict,
+            "reason": reason,
         }
 

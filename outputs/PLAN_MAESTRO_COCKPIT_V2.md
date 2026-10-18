@@ -551,3 +551,33 @@ recibía una **auditoría sintética completa**; el contexto de agentes publicab
 **Ley respetada:** dato no medido → `N/D — sin dato` o `null`; cero tokens
 sintéticos; cero promesas de EV; mismo bloque `dashboard` para exe, web y agentes.
 
+---
+
+## Anexo I — P1: anti-falacias en `gmgn_bridge.py` (A quién seguir / Qué comprar / Auditoría) (2026-10-18, sin commit)
+
+**Problema:** el puente GMGN fabricaba datos en los tres flujos hacia el Cockpit:
+
+1. `audit_token` sin CLI ni escáner devolvía un **PASS sintético** con literales (`rug_ratio 0.15`, `top10 22.0`, `dev 0.5`, `snipers 10.0`, MC/liq `15000/4500`).
+2. `rank_wallets_to_follow` mostraba el catálogo demo **siempre** (aun con `demo_mode=False`), y `_load_wallets_from_db` inventaba `PnL = solBalance × 150`, `WR30 = WR7 × 0.95`, holding `2490/134 s` y floor `max(trades, 5)`.
+3. La rama de esquema `tokens` (sin métricas on-chain) generaba candidatos completos inventados (`MC 6800`, `top10 21.5`, sparkline sintética, "Ballena Verificada"); la rama `Token` producía sparkline sintética y marcaba `metrics_known=True` con columnas ausentes; E0/E4b mostraban `$0` / `0.0%` cuando el dato faltaba.
+
+**Entregado (3 archivos):**
+
+| Archivo | Cambio |
+|---|---|
+| `detector/gmgn_bridge.py` | **`audit_token`**: sin fuente verificable → `verdict "UNVERIFIED"`, `is_safe False`, métricas `None`, patrón `UNVERIFIED_METRICS` (nunca PASS falso); fuente parcial → `UNVERIFIED` nombrando las métricas faltantes; PASS solo con las 4 críticas completas. **`rank_wallets_to_follow`**: catálogo demo solo con `demo_mode=True` (en vivo `[]`); DB sin PnL/WR30/holding inventados ni floor de trades; escalera tri-estado (`is_copyable: bool/None`) con razón explícita de datos incompletos; sort `None`-safe. **Tokens**: rama `tokens` fail-closed (omite + warning, cero candidatos); rama `Token` solo columnas reales, `sparkline: []`, `bundler_pct` real, `metrics_known` = presencia de top10/dev/bundler. **`screen_tokens_to_buy`**: sin sparkline default, sin `vol5m/10` para avg-tx, `holder_count` 0 si ausente. **`build_decision_stages`**: E0/E3/E4b con `value=None` + `N/D` cuando el dato falta. `SmartWalletProfile` con campos `Optional`. |
+| `tests/test_market_feed.py` | 9 tests anti-falacias: wallets fail-closed en vivo; demo solo explícito; DB de wallets sin campos inventados; esquema `tokens` sin fabricación; esquema `Token` medido con `metrics_known` real; `audit_token` UNVERIFIED sin datos; dossier real sin MC/liq sustitutos; trazas E0/E4b con `N/D`; **candado estático** que prohíbe reintroducir los literales erradicados (`6800.0`, `2100.0`, `21.5`, `sol_bal * 150.0`, `wr * 0.95`, `max(trades, 5)`, `vol5m / 10.0`, sparkline default). |
+| `cockpit/static/index.html` | `renderWallets` vía `nd()`: WR7/WR30/PnL/trades/holding muestran `N/D` con clase neutra si son `null`; `is_copyable` tri-estado (`SÍ` / `NO (MEV)` / `N/D`) en vez de tratar `null` como MEV. |
+
+**Evidencia:**
+- Suite completa → **549 passed + 17 subtests** (540 → 549, +9 exactos).
+- `scripts/verify.ps1` → VERIFY OK (exit 0): STATE.json fresco, gate 0 bloqueos, guard causal 9 passed, integridad de costes 9 passed, ciclo honesto OK.
+- `scripts/check_claims.py`: 77 errores = baseline exacto (0 nuevos).
+- En vivo (`demo_mode=False`): `/api/gmgn/wallets` responde `[]` cuando no hay fuente; las ramas offline `custom.db` (`tokens`) y `demo_pumpfun.db` no fabrican candidatos.
+
+**Riesgos residuales declarados:**
+1. `WATCH` por datos incompletos es estado honesto, **no** recomendación: `is_copyable=null` indica ausencia de evidencia; el gate de dinero real (N≥100 OOS, EV>0, PF>1.25) sigue cerrado (`edge_demostrado=False`).
+2. El catálogo demo permanece para tests/offline tras el contrato `demo_mode` (default False en servidor, launch.py y launchers); su aparición en vivo sería un bug de configuración, no de datos.
+3. `audit_token` por CLI con campos parciales ahora devuelve `UNVERIFIED` (antes fabricaba PASS): consumidores deben leer `metrics_known`.
+4. El alias bundler (`sniper_pct` si ≥25%, si no 0.0) se conserva como proxy medido (continuidad BP-006) cuando la fuente no expone `bundler_pct`.
+
