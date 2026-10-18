@@ -62,7 +62,7 @@ Por tanto, `reglas_produccion.json` puede contener reglas con FDR significativo 
 
 ### 5. Las métricas impresas como producción no son una prueba forward
 
-El `README` y varios artefactos presentan 81.1% WR, PF 18.93 y +59.69% como datos auditados. El checkout local documenta una base canónica externa (`D:\hjh\pumpscope\db\custom.db`), pero la base disponible aquí es `demo_pumpfun.db`, descrita por el propio diseño como sintética/intencional.
+El `README` y varios artefactos presentan 81.1% WR, PF 18.93 y +59.69% como datos auditados. El checkout local documenta una base canónica externa (`$PUMPSCOPE_DB`), pero la base disponible aquí es `demo_pumpfun.db`, descrita por el propio diseño como sintética/intencional.
 
 **Corrección prioritaria:** cada reporte debe incluir `data_origin`, hash de base, intervalo temporal, número de tokens únicos, número de operaciones, cobertura, costes, y si el resultado es `synthetic`, `historical`, `backtest`, `dry_run` o `forward_live`. Nunca mezclar demo con evidencia de rentabilidad.
 

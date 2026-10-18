@@ -2,9 +2,9 @@
 
 > **Versión:** 3.0.0 (Master Signal & Loss Learner Engine)  
 > **Modo Operativo:** Forward Audit / Datos Reales On-Chain (§3 Sin Mocks Silenciosos)  
-> **Base de Datos Canónica:** `D:\hjh\pumpscope\db\custom.db` (52,757 tokens, 4,991 posiciones, 43,963 rutas de precio)  
+> **Base de Datos Canónica:** `$PUMPSCOPE_DB` (52,757 tokens, 4,991 posiciones, 43,963 rutas de precio)  
 > **Filtrador Único:** `MasterSnipeSignal` (`detector/master_signal.py`)  
-> **Documentación IA-Friendly:** Consulta [`AGENTS.md`](file:///d:/mejoradordebase%20de%20datos/pumpfun_detector/AGENTS.md) y [`ARCHITECTURE.md`](file:///d:/mejoradordebase%20de%20datos/pumpfun_detector/ARCHITECTURE.md)
+> **Documentación IA-Friendly:** Consulta [`AGENTS.md`](AGENTS.md) y [`ARCHITECTURE.md`](ARCHITECTURE.md)
 
 > ⚠️ **AVISO DE HONESTIDAD.** Las cifras de winrate/profit factor de este documento son **declaradas (in-sample o hardcodeadas), NO validadas fuera de muestra**. La verdad medida está en **[`STATUS.md`](./STATUS.md)**. No uses este README como evidencia de rentabilidad.
 
@@ -81,7 +81,7 @@ pip install pandas numpy scikit-learn matplotlib scipy
 
 ### Ejecutar con tu Base de Datos Real
 ```powershell
-python main.py --db "D:\hjh\pumpscope\db\custom.db"
+python main.py --db "$PUMPSCOPE_DB"
 ```
 
 ### Ejecutar en Modo Demo Sintético
@@ -94,14 +94,14 @@ python main.py --demo
 La auditoría SQLite funciona separada del análisis de trading, abre la fuente en solo lectura y no genera señales ni cambia reglas. El origen es una declaración; solo usa `synthetic` cuando se trata de una base generada por el demo:
 
 ```powershell
-python main.py --db "D:\hjh\pumpscope\db\custom.db" `
+python main.py --db "$PUMPSCOPE_DB" `
     --audit-only --data-origin real --out resultados\auditoria
 ```
 
 Genera `auditoria.json` y `auditoria.html` dentro de `--out`. El perfil `basic` (predeterminado) toma hasta 100 filas por columna y etiqueta cada métrica como `sample`; ajusta el límite con `--audit-sample-rows 500`. No son estimaciones representativas de toda la tabla. Para recorrer datos completos, primero muestra las tablas afectadas y exige confirmación:
 
 ```powershell
-python main.py --db "D:\hjh\pumpscope\db\custom.db" `
+python main.py --db "$PUMPSCOPE_DB" `
     --audit-only --audit-depth deep --confirm-deep --out resultados\auditoria
 ```
 
@@ -109,7 +109,7 @@ También se puede corregir el mapeo de tablas/columnas con `--mapping mapping.js
 
 ### Parámetros Opcionales
 ```powershell
-python main.py --db "D:\hjh\pumpscope\db\custom.db" `
+python main.py --db "$PUMPSCOPE_DB" `
     --tp 300 --sl 15 `
     --future-threshold 20 `
     --horizons 5,15,30 `
@@ -120,16 +120,16 @@ python main.py --db "D:\hjh\pumpscope\db\custom.db" `
 
 ## 5. Artefactos de Salida Generados
 
-1. **[`resultados/reporte.html`](file:///d:/mejoradordebase%20de%20datos/pumpfun_detector/resultados/reporte.html)**:
+1. **[`resultados/reporte.html`](resultados/reporte.html)**:
    - Dashboard interactivo autocontenido.
    - Simulador en tiempo real con control de umbral $\tau$.
    - Curvas de capital (Baseline sin filtro vs Salidas dinámicas vs Master Signal vs Fractional Kelly).
-2. **[`resultados/estrategia_produccion.py`](file:///d:/mejoradordebase%20de%20datos/pumpfun_detector/resultados/estrategia_produccion.py)**:
+2. **[`resultados/estrategia_produccion.py`](resultados/estrategia_produccion.py)**:
    - Módulo Python ejecutable para bots de producción en Solana.
    - Expone `should_enter_token(features)` y cálculo de Fractional Kelly.
-3. **[`resultados/reglas_produccion.json`](file:///d:/mejoradordebase%20de%20datos/pumpfun_detector/resultados/reglas_produccion.json)**:
+3. **[`resultados/reglas_produccion.json`](resultados/reglas_produccion.json)**:
    - Parámetros serializados en JSON con validación FDR y umbrales de salida.
-4. **[`resultados/hallazgos.csv`](file:///d:/mejoradordebase%20de%20datos/pumpfun_detector/resultados/hallazgos.csv)**:
+4. **[`resultados/hallazgos.csv`](resultados/hallazgos.csv)**:
    - Tabla completa de subgrupos, reglas de árbol, q-valores FDR y métricas OOS.
 
 ---
@@ -163,5 +163,5 @@ else:
 ## 7. Protocolo de Agentes y Arquitectura Técnica
 
 Para agentes autónomos o desarrolladores que deseen extender el sistema:
-- Protocolo y esquemas JSON: [`AGENTS.md`](file:///d:/mejoradordebase%20de%20datos/pumpfun_detector/AGENTS.md)
-- Arquitectura matemática y microestructura CPMM: [`ARCHITECTURE.md`](file:///d:/mejoradordebase%20de%20datos/pumpfun_detector/ARCHITECTURE.md)
+- Protocolo y esquemas JSON: [`AGENTS.md`](AGENTS.md)
+- Arquitectura matemática y microestructura CPMM: [`ARCHITECTURE.md`](ARCHITECTURE.md)

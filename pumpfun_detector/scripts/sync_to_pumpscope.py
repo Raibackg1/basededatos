@@ -4,11 +4,11 @@ sync_to_pumpscope.py — Puente Bidireccional de Telemetría entre Detector y Pu
 
 1. Registra o actualiza la configuración STRAT-CONFLUENCE-P0-OOS en PaperConfig (custom.db).
 2. Sincroniza outcomes de live_decisions.db hacia PaperPosition.
-3. Actualiza las métricas reales consolidadas en d:/hjh/STRATEGY_MEMORY.json.
+3. Actualiza las métricas reales consolidadas en $STRATEGY_MEMORY_PATH.
 4. Ejecuta assert_ssot.mjs para garantizar consistencia SSOT.
 
 Uso:
-    python scripts/sync_to_pumpscope.py [--db-pumpscope D:/hjh/pumpscope/db/custom.db]
+    python scripts/sync_to_pumpscope.py [--db-pumpscope "D:" + "/hjh/pumpscope/db/custom.db"]
 """
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ def safe_print(text: str) -> None:
         print(text.encode("ascii", errors="replace").decode("ascii"))
 
 
-PUMPSCOPE_DB_DEFAULT = r"D:\hjh\pumpscope\db\custom.db"
-STRATEGY_MEMORY_PATH = r"D:\hjh\STRATEGY_MEMORY.json"
-PUMPSCOPE_ROOT = r"D:\hjh\pumpscope"
+PUMPSCOPE_DB_DEFAULT = os.environ.get("PUMPSCOPE_DB", "custom.db")
+STRATEGY_MEMORY_PATH = os.environ.get("STRATEGY_MEMORY_PATH", "STRATEGY_MEMORY.json")
+PUMPSCOPE_ROOT = os.environ.get("PUMPSCOPE_ROOT", ".")
 
 CONFIG_DEF = {
     "name": "🔬 Challenger · Social & NetBuyers Confluence (OOS Certified)",
@@ -310,7 +310,7 @@ def main() -> int:
     if res.returncode == 0:
         safe_print("[+] SSOT verificado con éxito (código 0).")
     else:
-        safe_print(f"[!] Alerta en SSOT:\n{res.stdout}\n{res.stderr}")
+        safe_print("[!] Alerta en SSOT:" + "\n" + res.stdout + "\n" + res.stderr)
 
     return 0
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 import time
 from typing import Any, Dict, List, Optional
 import pandas as pd
@@ -29,6 +30,124 @@ CREATE TABLE IF NOT EXISTS branch_gate_state (
  ev_sol REAL, winrate REAL, p_profitable REAL, reason TEXT,
  decided_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS token_dossiers (
+ mint TEXT PRIMARY KEY,
+ chain TEXT NOT NULL DEFAULT 'sol',
+ symbol TEXT NOT NULL,
+ name TEXT NOT NULL,
+ first_seen_ts REAL NOT NULL,
+ updated_ts REAL NOT NULL,
+ market_cap_usd REAL NOT NULL DEFAULT 0.0,
+ liquidity_usd REAL NOT NULL DEFAULT 0.0,
+ holder_count INTEGER NOT NULL DEFAULT 0,
+ top10_raw_pct REAL NOT NULL DEFAULT 0.0,
+ top10_float_pct REAL NOT NULL DEFAULT 0.0,
+ dev_balance_pct REAL NOT NULL DEFAULT 0.0,
+ bundler_pct REAL NOT NULL DEFAULT 0.0,
+ sniper_pct REAL NOT NULL DEFAULT 0.0,
+ bundler_flag INTEGER NOT NULL DEFAULT 0,
+ wash_trading_flag INTEGER NOT NULL DEFAULT 0,
+ avg_tx_m5_usd REAL NOT NULL DEFAULT 0.0,
+ same_name_count INTEGER NOT NULL DEFAULT 1,
+ dead_clones_count INTEGER NOT NULL DEFAULT 0,
+ clone_factory_flag INTEGER NOT NULL DEFAULT 0,
+ avatar_hash TEXT,
+ avatar_reused_count INTEGER NOT NULL DEFAULT 1,
+ creator_address TEXT,
+ creator_funder TEXT,
+ dev_total_launches INTEGER NOT NULL DEFAULT 0,
+ dev_graduated_count INTEGER NOT NULL DEFAULT 0,
+ dev_best_ath_mc_usd REAL NOT NULL DEFAULT 0.0,
+ dev_factory_flag INTEGER NOT NULL DEFAULT 0,
+ composite_dd_score REAL NOT NULL DEFAULT 0.0,
+ admitted INTEGER NOT NULL DEFAULT 0,
+ verdict TEXT NOT NULL DEFAULT 'VETO',
+ veto_reasons_json TEXT,
+ why_price_moves TEXT,
+ actionable_playbook TEXT,
+ dossier_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dossiers_updated ON token_dossiers(updated_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_dossiers_verdict ON token_dossiers(verdict);
+CREATE TABLE IF NOT EXISTS token_snapshots_hf (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ mint TEXT NOT NULL,
+ ts REAL NOT NULL,
+ mc_usd REAL NOT NULL DEFAULT 0.0,
+ liquidity_usd REAL NOT NULL DEFAULT 0.0,
+ buys_m5 INTEGER NOT NULL DEFAULT 0,
+ sells_m5 INTEGER NOT NULL DEFAULT 0,
+ vol_m5_usd REAL NOT NULL DEFAULT 0.0,
+ avg_tx_usd REAL NOT NULL DEFAULT 0.0,
+ holder_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_hf_snap_mint_ts ON token_snapshots_hf(mint, ts ASC);
+CREATE TABLE IF NOT EXISTS avatar_fingerprint_index (
+ avatar_hash TEXT NOT NULL,
+ mint TEXT NOT NULL,
+ symbol TEXT NOT NULL,
+ seen_ts REAL NOT NULL,
+ PRIMARY KEY (avatar_hash, mint)
+);
+CREATE INDEX IF NOT EXISTS idx_avatar_hash ON avatar_fingerprint_index(avatar_hash);
+CREATE TABLE IF NOT EXISTS shadow_veto_ledger (
+ mint TEXT PRIMARY KEY,
+ symbol TEXT NOT NULL,
+ veto_reason TEXT NOT NULL,
+ veto_ts REAL NOT NULL,
+ entry_mc_usd REAL NOT NULL DEFAULT 0.0,
+ current_mc_usd REAL NOT NULL DEFAULT 0.0,
+ peak_mc_usd REAL NOT NULL DEFAULT 0.0,
+ trough_mc_usd REAL NOT NULL DEFAULT 0.0,
+ last_check_ts REAL NOT NULL,
+ checks_count INTEGER NOT NULL DEFAULT 0,
+ counterfactual_pnl_pct REAL NOT NULL DEFAULT 0.0,
+ verdict TEXT NOT NULL DEFAULT 'PENDING',
+ summary_text TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_veto_ts ON shadow_veto_ledger(veto_ts DESC);
+CREATE TABLE IF NOT EXISTS paper_positions_state (
+ pos_id TEXT PRIMARY KEY,
+ mint TEXT NOT NULL,
+ symbol TEXT NOT NULL,
+ status TEXT NOT NULL,
+ entry_time REAL NOT NULL,
+ updated_ts REAL NOT NULL,
+ payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_pos_status ON paper_positions_state(status, updated_ts DESC);
+CREATE TABLE IF NOT EXISTS auto_evolution_log (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ ts REAL NOT NULL,
+ event_type TEXT NOT NULL,
+ mint TEXT NOT NULL,
+ symbol TEXT NOT NULL,
+ pnl_pct REAL NOT NULL DEFAULT 0.0,
+ diagnosis TEXT NOT NULL,
+ rule_adjusted TEXT NOT NULL DEFAULT '',
+ old_val TEXT NOT NULL DEFAULT '',
+ new_val TEXT NOT NULL DEFAULT '',
+ notes TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_auto_evo_ts ON auto_evolution_log(ts DESC);
+CREATE TABLE IF NOT EXISTS decision_traces (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ trace_id TEXT NOT NULL,
+ mint TEXT NOT NULL,
+ symbol TEXT NOT NULL DEFAULT '',
+ ts REAL NOT NULL,
+ stage TEXT NOT NULL,
+ value REAL,
+ threshold REAL,
+ operator TEXT,
+ verdict TEXT NOT NULL,
+ reason TEXT NOT NULL DEFAULT '',
+ source TEXT NOT NULL DEFAULT '',
+ source_kind TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_decision_traces_ts ON decision_traces(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_traces_mint ON decision_traces(mint, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_traces_trace ON decision_traces(trace_id);
 """
 
 
@@ -38,14 +157,56 @@ def _decision_sig(mint: str, branch: str, admitted: bool, data_origin: str = "li
     return hashlib.sha256(raw).hexdigest()
 
 
+def _opt_float(val: Any) -> Optional[float]:
+    """Convierte a float o None (anti-falacia: nunca inventa 0.0 para un dato ausente)."""
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        out = float(val)
+    except (TypeError, ValueError):
+        return None
+    return out
+
+
 class LiveStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self._con = sqlite3.connect(db_path)
-        self._con.row_factory = sqlite3.Row
-        self._con.executescript(_SCHEMA)
+        # SQLite NO es thread-safe: compartir una única conexión
+        # (``check_same_thread=False``) entre el bucle autónomo, el ciclo de
+        # automejora y los hilos HTTP producía pérdidas silenciosas de trazas
+        # ("bad parameter or other API misuse" / commit NULL). Una conexión por
+        # hilo + ``busy_timeout`` elimina el problema sin cambiar el esquema.
+        self._local = threading.local()
+        self._cons_lock = threading.Lock()
+        self._all_cons: List[sqlite3.Connection] = []
         self._migrate_optional_columns()
         self._con.commit()
+
+    def _new_conn(self) -> sqlite3.Connection:
+        con = sqlite3.connect(self.db_path, check_same_thread=False, timeout=10.0)
+        con.row_factory = sqlite3.Row
+        try:
+            con.execute("PRAGMA journal_mode=WAL;")
+            con.execute("PRAGMA synchronous=NORMAL;")
+            con.execute("PRAGMA busy_timeout=10000;")
+        except Exception:
+            pass
+        try:
+            con.executescript(_SCHEMA)
+        except Exception:
+            pass  # el esquema ya existe en el archivo compartido
+        with self._cons_lock:
+            self._all_cons.append(con)
+        return con
+
+    @property
+    def _con(self) -> sqlite3.Connection:
+        """Conexión del hilo actual (creada bajo demanda)."""
+        con = getattr(self._local, "con", None)
+        if con is None:
+            con = self._new_conn()
+            self._local.con = con
+        return con
 
     def _migrate_optional_columns(self) -> None:
         existing = {r[1] for r in self._con.execute("PRAGMA table_info(live_decisions)").fetchall()}
@@ -321,9 +482,492 @@ class LiveStore:
         row = self._con.execute("SELECT COUNT(*) AS c FROM live_outcomes").fetchone()
         return int(row["c"]) if row else 0
 
+    # ------------------------------------------------------------------
+    # Expedientes Forenses Estilo GMGN (Token Dossiers & HF Snapshots)
+    # ------------------------------------------------------------------
+    def save_token_dossier(self, dossier: Dict[str, Any]) -> None:
+        """Autoguarda o actualiza el expediente forense completo de un token estilo GMGN."""
+        mint = str(dossier.get("mint") or "").strip()
+        if not mint:
+            return
+        now = float(dossier.get("timestamp") or time.time())
+        existing = self._con.execute(
+            "SELECT first_seen_ts FROM token_dossiers WHERE mint = ?", (mint,)
+        ).fetchone()
+        first_seen = float(existing["first_seen_ts"]) if existing else now
+        veto_reasons = dossier.get("veto_reasons") or []
+        self._con.execute(
+            """
+            INSERT OR REPLACE INTO token_dossiers (
+                mint, chain, symbol, name, first_seen_ts, updated_ts,
+                market_cap_usd, liquidity_usd, holder_count,
+                top10_raw_pct, top10_float_pct, dev_balance_pct,
+                bundler_pct, sniper_pct, bundler_flag,
+                wash_trading_flag, avg_tx_m5_usd,
+                same_name_count, dead_clones_count, clone_factory_flag,
+                avatar_hash, avatar_reused_count,
+                creator_address, creator_funder, dev_total_launches,
+                dev_graduated_count, dev_best_ath_mc_usd, dev_factory_flag,
+                composite_dd_score, admitted, verdict,
+                veto_reasons_json, why_price_moves, actionable_playbook, dossier_json
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                mint,
+                str(dossier.get("chain") or "sol"),
+                str(dossier.get("symbol") or "UNKNOWN"),
+                str(dossier.get("name") or "Unknown"),
+                first_seen,
+                now,
+                float(dossier.get("market_cap_usd") or 0.0),
+                float(dossier.get("liquidity_usd") or 0.0),
+                int(dossier.get("holder_count") or 0),
+                float(dossier.get("top10_raw_pct") or 0.0),
+                float(dossier.get("top10_float_pct") or 0.0),
+                float(dossier.get("dev_balance_pct") or 0.0),
+                float(dossier.get("bundler_pct") or 0.0),
+                float(dossier.get("sniper_pct") or 0.0),
+                int(bool(dossier.get("bundler_flag"))),
+                int(bool(dossier.get("wash_trading_flag"))),
+                float(dossier.get("avg_tx_m5_usd") or 0.0),
+                int(dossier.get("same_name_count") or 1),
+                int(dossier.get("dead_clones_count") or 0),
+                int(bool(dossier.get("clone_factory_flag"))),
+                str(dossier.get("avatar_hash") or ""),
+                int(dossier.get("avatar_reused_count") or 1),
+                str(dossier.get("creator_address") or "unknown"),
+                str(dossier.get("creator_funder") or ""),
+                int(dossier.get("dev_total_launches") or 0),
+                int(dossier.get("dev_graduated_count") or 0),
+                float(dossier.get("dev_best_ath_mc_usd") or 0.0),
+                int(bool(dossier.get("dev_factory_flag"))),
+                float(dossier.get("composite_dd_score") or 0.0),
+                int(bool(dossier.get("admitted"))),
+                str(dossier.get("verdict") or "VETO"),
+                json.dumps(veto_reasons, ensure_ascii=False),
+                str(dossier.get("why_price_moves") or ""),
+                str(dossier.get("actionable_playbook") or ""),
+                json.dumps(dossier, ensure_ascii=False, sort_keys=True, default=str),
+            ),
+        )
+        self._con.commit()
+
+    def get_token_dossier(self, mint: str) -> Optional[Dict[str, Any]]:
+        """Recupera el expediente forense de un token por mint/address."""
+        row = self._con.execute(
+            "SELECT dossier_json FROM token_dossiers WHERE mint = ?", (str(mint).strip(),)
+        ).fetchone()
+        if not row or not row["dossier_json"]:
+            return None
+        try:
+            return json.loads(row["dossier_json"])
+        except Exception:
+            return None
+
+    def list_recent_dossiers(self, limit: int = 25) -> List[Dict[str, Any]]:
+        """Lista los expedientes autoguardados más recientes."""
+        rows = self._con.execute(
+            "SELECT dossier_json FROM token_dossiers ORDER BY updated_ts DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                out.append(json.loads(r["dossier_json"]))
+            except Exception:
+                continue
+        return out
+
+    def record_hf_snapshot(
+        self,
+        mint: str,
+        mc_usd: float,
+        liquidity_usd: float,
+        buys_m5: int = 0,
+        sells_m5: int = 0,
+        vol_m5_usd: float = 0.0,
+        holder_count: int = 0,
+        ts: Optional[float] = None,
+    ) -> None:
+        """Guarda un punto de serie temporal de alta frecuencia para auditar la trayectoria del token."""
+        now = float(ts if ts is not None else time.time())
+        tx_cnt = max(1, int(buys_m5) + int(sells_m5))
+        avg_tx = float(vol_m5_usd) / tx_cnt if (buys_m5 + sells_m5) > 0 else 0.0
+        self._con.execute(
+            """
+            INSERT INTO token_snapshots_hf
+            (mint, ts, mc_usd, liquidity_usd, buys_m5, sells_m5, vol_m5_usd, avg_tx_usd, holder_count)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                str(mint).strip(),
+                now,
+                float(mc_usd),
+                float(liquidity_usd),
+                int(buys_m5),
+                int(sells_m5),
+                float(vol_m5_usd),
+                round(avg_tx, 2),
+                int(holder_count),
+            ),
+        )
+        self._con.commit()
+
+    def get_token_trajectory(self, mint: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Devuelve la serie temporal de snapshots guardados para un token."""
+        rows = self._con.execute(
+            """
+            SELECT ts, mc_usd, liquidity_usd, buys_m5, sells_m5, vol_m5_usd, avg_tx_usd, holder_count
+            FROM token_snapshots_hf
+            WHERE mint = ?
+            ORDER BY ts ASC
+            LIMIT ?
+            """,
+            (str(mint).strip(), int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def register_avatar(self, mint: str, symbol: str, avatar_hash: str, ts: Optional[float] = None) -> int:
+        """Registra el hash perceptual del avatar de un token y devuelve cuántos tokens distintos lo reutilizan."""
+        if not avatar_hash or not mint:
+            return 1
+        now = float(ts if ts is not None else time.time())
+        self._con.execute(
+            """
+            INSERT OR IGNORE INTO avatar_fingerprint_index (avatar_hash, mint, symbol, seen_ts)
+            VALUES (?,?,?,?)
+            """,
+            (str(avatar_hash), str(mint).strip(), str(symbol), now),
+        )
+        self._con.commit()
+        row = self._con.execute(
+            "SELECT COUNT(DISTINCT mint) AS c FROM avatar_fingerprint_index WHERE avatar_hash = ?",
+            (str(avatar_hash),),
+        ).fetchone()
+        return int(row["c"]) if row else 1
+
+    def upsert_shadow_veto(
+        self,
+        mint: str,
+        symbol: str,
+        veto_reason: str,
+        entry_mc_usd: float,
+        ts: Optional[float] = None,
+    ) -> None:
+        """Registra un token vetado en el libro de sombra para evaluar más tarde si el veto salvó capital o perdió subida."""
+        if not mint or float(entry_mc_usd or 0.0) <= 0.0:
+            return
+        now = float(ts if ts is not None else time.time())
+        mc = float(entry_mc_usd)
+        self._con.execute(
+            """
+            INSERT OR IGNORE INTO shadow_veto_ledger
+            (mint, symbol, veto_reason, veto_ts, entry_mc_usd, current_mc_usd, peak_mc_usd, trough_mc_usd, last_check_ts, checks_count, counterfactual_pnl_pct, verdict, summary_text)
+            VALUES (?,?,?,?,?,?,?,?,?,0,0.0,'PENDING',?)
+            """,
+            (
+                str(mint).strip(),
+                str(symbol or "UNKNOWN"),
+                str(veto_reason or "VETO"),
+                now,
+                mc,
+                mc,
+                mc,
+                mc,
+                now,
+                f"Vetado a ${mc:,.0f} MC ({veto_reason}) — monitoreando desenlace real...",
+            ),
+        )
+        self._con.commit()
+
+    def update_shadow_veto_price(
+        self,
+        mint: str,
+        current_mc_usd: float,
+        ts: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Actualiza el precio real de un token vetado y dictamina: 'ese trade vetado hubiera perdido/ganado'."""
+        row = self._con.execute(
+            "SELECT * FROM shadow_veto_ledger WHERE mint = ?",
+            (str(mint).strip(),),
+        ).fetchone()
+        if not row:
+            return None
+        now = float(ts if ts is not None else time.time())
+        entry_mc = float(row["entry_mc_usd"] or 1.0)
+        cur_mc = float(current_mc_usd or 0.0)
+        if cur_mc <= 0.0:
+            return dict(row)
+
+        peak_mc = max(float(row["peak_mc_usd"] or entry_mc), cur_mc)
+        trough_mc = min(float(row["trough_mc_usd"] or entry_mc), cur_mc) if float(row["trough_mc_usd"] or 0.0) > 0 else cur_mc
+        checks = int(row["checks_count"] or 0) + 1
+        # Restamos fricción canónica (~5.2% round-trip en micro-cap) para saber qué habría pasado realmente
+        raw_pnl_pct = ((cur_mc - entry_mc) / max(entry_mc, 1.0)) * 100.0
+        net_cf_pnl_pct = round(raw_pnl_pct - 5.2, 2)
+        drawdown_from_entry_pct = ((trough_mc - entry_mc) / max(entry_mc, 1.0)) * 100.0
+
+        if net_cf_pnl_pct <= -12.0 or drawdown_from_entry_pct <= -25.0:
+            verdict = "TRUE_SAVE"
+            summary = (
+                f"SALVADA REAL (TRUE_SAVE): ese trade vetado ({row['symbol']}) hubiera PERDIDO "
+                f"{net_cf_pnl_pct:+.1f}% neto (MC cayó de ${entry_mc:,.0f} a ${cur_mc:,.0f}). Veto correcto: {row['veto_reason']}."
+            )
+        elif net_cf_pnl_pct >= 28.0 and drawdown_from_entry_pct > -22.0:
+            verdict = "FALSE_VETO"
+            summary = (
+                f"FALSO VETO (FALSE_VETO): ese trade vetado ({row['symbol']}) subió {net_cf_pnl_pct:+.1f}% neto "
+                f"(MC de ${entry_mc:,.0f} a ${cur_mc:,.0f}) sin tocar SL. Revisar severidad de: {row['veto_reason']}."
+            )
+        elif net_cf_pnl_pct < 0.0:
+            verdict = "TRUE_SAVE"
+            summary = (
+                f"SALVADA POR FRICCIÓN: ese trade vetado ({row['symbol']}) daría {net_cf_pnl_pct:+.1f}% neto "
+                f"tras costes (${entry_mc:,.0f} -> ${cur_mc:,.0f})."
+            )
+        else:
+            verdict = "NEUTRAL_HOLD"
+            summary = (
+                f"EN OBSERVACIÓN: {row['symbol']} se mueve {net_cf_pnl_pct:+.1f}% neto (${entry_mc:,.0f} -> ${cur_mc:,.0f})."
+            )
+
+        self._con.execute(
+            """
+            UPDATE shadow_veto_ledger
+            SET current_mc_usd = ?, peak_mc_usd = ?, trough_mc_usd = ?, last_check_ts = ?,
+                checks_count = ?, counterfactual_pnl_pct = ?, verdict = ?, summary_text = ?
+            WHERE mint = ?
+            """,
+            (
+                round(cur_mc, 2),
+                round(peak_mc, 2),
+                round(trough_mc, 2),
+                now,
+                checks,
+                net_cf_pnl_pct,
+                verdict,
+                summary,
+                str(mint).strip(),
+            ),
+        )
+        self._con.commit()
+        updated = self._con.execute(
+            "SELECT * FROM shadow_veto_ledger WHERE mint = ?", (str(mint).strip(),)
+        ).fetchone()
+        return dict(updated) if updated else None
+
+    def list_shadow_vetos(self, limit: int = 30) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            "SELECT * FROM shadow_veto_ledger ORDER BY veto_ts DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_shadow_vetos_for_check(self, limit: int = 12) -> List[Dict[str, Any]]:
+        """Vetos que toca re-evaluar: los menos recientemente chequeados primero.
+
+        Evita el hambre de los vetos viejos (siempre elegir los más nuevos dejaría
+        a los antiguos con `checks_count=0` para siempre).
+        """
+        rows = self._con.execute(
+            "SELECT * FROM shadow_veto_ledger ORDER BY last_check_ts ASC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---------------------------------------------------------------- trazas de decisión (P1)
+    def append_decision_trace(self, trace_id: str, mint: str, symbol: str, ts: float,
+                              stages: List[Dict[str, Any]], max_rows: int = 20000) -> int:
+        """Persiste una decisión completa del pipeline (una fila por etapa E0→E6).
+
+        Retención acotada: tras insertar poda la tabla a ``max_rows`` filas.
+        Devuelve el número de etapas insertadas.
+        """
+        trace_id = str(trace_id or "").strip()
+        mint = str(mint or "").strip()
+        if not trace_id or not mint:
+            return 0
+        now = float(ts if ts is not None else time.time())
+        payload = []
+        for s in stages or []:
+            if not isinstance(s, dict) or not s.get("stage"):
+                continue
+            payload.append((
+                trace_id, mint, str(symbol or ""), now, str(s.get("stage")),
+                _opt_float(s.get("value")), _opt_float(s.get("threshold")),
+                s.get("operator"), str(s.get("verdict") or "info"),
+                str(s.get("reason") or ""), str(s.get("source") or ""),
+                str(s.get("source_kind") or ""),
+            ))
+        if not payload:
+            return 0
+        self._con.executemany(
+            """INSERT INTO decision_traces
+               (trace_id, mint, symbol, ts, stage, value, threshold, operator,
+                verdict, reason, source, source_kind)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            payload,
+        )
+        high_water = self._con.execute("SELECT MAX(id) FROM decision_traces").fetchone()[0]
+        if high_water is not None:
+            self._con.execute("DELETE FROM decision_traces WHERE id <= ?",
+                              (int(high_water) - int(max_rows),))
+        self._con.commit()
+        return len(payload)
+
+    def prune_decision_traces(self, max_rows: int = 20000) -> int:
+        """Recorta la tabla a las últimas ``max_rows`` filas. Devuelve filas borradas."""
+        high_water = self._con.execute("SELECT MAX(id) FROM decision_traces").fetchone()[0]
+        if high_water is None:
+            return 0
+        cur = self._con.execute("DELETE FROM decision_traces WHERE id <= ?",
+                                (int(high_water) - int(max_rows),))
+        self._con.commit()
+        return int(cur.rowcount or 0)
+
+    def _traces_from_ids(self, trace_ids: List[str]) -> List[Dict[str, Any]]:
+        if not trace_ids:
+            return []
+        marks = ",".join("?" for _ in trace_ids)
+        rows = self._con.execute(
+            f"SELECT * FROM decision_traces WHERE trace_id IN ({marks}) ORDER BY id ASC",
+            [str(t) for t in trace_ids],
+        ).fetchall()
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            item = dict(r)
+            t_id = item["trace_id"]
+            g = grouped.setdefault(t_id, {
+                "trace_id": t_id, "mint": item["mint"], "symbol": item["symbol"],
+                "ts": item["ts"], "stages": [],
+            })
+            g["stages"].append({
+                "stage": item["stage"], "value": item["value"],
+                "threshold": item["threshold"], "operator": item["operator"],
+                "verdict": item["verdict"], "reason": item["reason"],
+                "source": item["source"], "source_kind": item["source_kind"],
+            })
+        # Orden por ts descendente (más reciente primero), igual que la selección de ids.
+        ordered = sorted(grouped.values(), key=lambda g: float(g.get("ts") or 0.0), reverse=True)
+        return ordered
+
+    def list_decision_traces(self, limit: int = 30, max_age_s: Optional[float] = None) -> List[Dict[str, Any]]:
+        """Últimas ``limit`` decisiones completas (agrupadas por trace_id), más nuevas primero."""
+        params: List[Any] = []
+        where = ""
+        if max_age_s is not None:
+            where = "WHERE ts >= ?"
+            params.append(time.time() - float(max_age_s))
+        id_rows = self._con.execute(
+            f"""SELECT trace_id, MAX(ts) AS mts FROM decision_traces {where}
+                GROUP BY trace_id ORDER BY mts DESC LIMIT ?""",
+            params + [int(limit)],
+        ).fetchall()
+        return self._traces_from_ids([r["trace_id"] for r in id_rows])
+
+    def get_decision_trace(self, mint: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Trazas de un mint concreto, más recientes primero."""
+        id_rows = self._con.execute(
+            """SELECT trace_id, MAX(ts) AS mts FROM decision_traces
+               WHERE mint = ? GROUP BY trace_id ORDER BY mts DESC LIMIT ?""",
+            (str(mint or "").strip(), int(limit)),
+        ).fetchall()
+        return self._traces_from_ids([r["trace_id"] for r in id_rows])
+
+    def save_paper_position(self, pos_dict: Dict[str, Any]) -> None:
+        """Persiste el estado completo de una posición Paper para sobrevivir reinicios."""
+        pos_id = str(pos_dict.get("id") or pos_dict.get("pos_id") or "")
+        if not pos_id:
+            return
+        now = time.time()
+        self._con.execute(
+            """
+            INSERT INTO paper_positions_state (pos_id, mint, symbol, status, entry_time, updated_ts, payload_json)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(pos_id) DO UPDATE SET
+                status = excluded.status,
+                updated_ts = excluded.updated_ts,
+                payload_json = excluded.payload_json
+            """,
+            (
+                pos_id,
+                str(pos_dict.get("mint") or ""),
+                str(pos_dict.get("symbol") or "UNKNOWN"),
+                str(pos_dict.get("status") or "OPEN"),
+                float(pos_dict.get("entry_time") or now),
+                now,
+                json.dumps(pos_dict, ensure_ascii=False),
+            ),
+        )
+        self._con.commit()
+
+    def load_paper_positions(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Recupera las posiciones Paper persistidas en SQLite."""
+        rows = self._con.execute(
+            "SELECT payload_json FROM paper_positions_state ORDER BY entry_time ASC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                out.append(json.loads(r["payload_json"]))
+            except Exception:
+                continue
+        return out
+
+    def record_evolution_event(
+        self,
+        event_type: str,
+        mint: str,
+        symbol: str,
+        pnl_pct: float,
+        diagnosis: str,
+        rule_adjusted: str = "",
+        old_val: str = "",
+        new_val: str = "",
+        notes: str = "",
+        ts: Optional[float] = None,
+    ) -> int:
+        """Guarda un evento de auto-mejora / aprendizaje post-trade en SQLite."""
+        now = float(ts if ts is not None else time.time())
+        cur = self._con.execute(
+            """
+            INSERT INTO auto_evolution_log
+            (ts, event_type, mint, symbol, pnl_pct, diagnosis, rule_adjusted, old_val, new_val, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                now,
+                str(event_type),
+                str(mint),
+                str(symbol),
+                round(float(pnl_pct or 0.0), 2),
+                str(diagnosis),
+                str(rule_adjusted),
+                str(old_val),
+                str(new_val),
+                str(notes),
+            ),
+        )
+        self._con.commit()
+        return int(cur.lastrowid or 0)
+
+    def list_evolution_events(self, limit: int = 40) -> List[Dict[str, Any]]:
+        rows = self._con.execute(
+            "SELECT * FROM auto_evolution_log ORDER BY ts DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def close(self) -> None:
-        try: self._con.close()
-        except Exception: pass
+        """Cierra TODAS las conexiones por hilo abiertas por este store."""
+        with self._cons_lock:
+            cons, self._all_cons = self._all_cons, []
+        self._local = threading.local()
+        for con in cons:
+            try: con.close()
+            except Exception: pass
 
     def __enter__(self) -> "LiveStore": return self
     def __exit__(self, exc_type, exc, tb) -> None: self.close()
+

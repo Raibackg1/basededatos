@@ -1,5 +1,5 @@
 import sqlite3, pathlib
-db = pathlib.Path(r"d:\mejoradordebase de datos\pumpfun_detector\demo_pumpfun.db")
+db = pathlib.Path(os.environ.get("PUMPSCOPE_DEMO_DB", "pumpfun_detector/demo_pumpfun.db"))
 con = sqlite3.connect(str(db))
 cur = con.cursor()
 tabs = [r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")]

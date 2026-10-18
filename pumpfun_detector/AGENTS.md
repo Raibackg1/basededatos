@@ -2,9 +2,9 @@
 
 > **Ecosistema:** Pump.fun Detector & Cockpit (Solana High-Frequency Quantitative Trading)  
 > **Modo Operativo Obligatorio:** DRY-RUN / PAPER FORWARD (Fondos reales estrictamente bloqueados)  
-> **Base de Datos Canónica:** `D:\hjh\pumpscope\db\custom.db` (52,169 tokens, 5,021 operaciones cerradas, modo `file:...mode=ro`)  
-> **SSOT Canónico de Rendimiento:** [`STATUS.md`](./STATUS.md)  
-> **SSOT Canónico de Supervisión:** [`instrucciones/PROTOCOLO_SUPERVISION_ANTIGRAVITY.md`](file:///d:/hjh/instrucciones/PROTOCOLO_SUPERVISION_ANTIGRAVITY.md)
+> **Base de Datos Canónica:** `$PUMPSCOPE_DB` (modo `file:...mode=ro`) — 65,423 tokens, 5,021 ops cerradas  
+> **SSOT de Rendimiento Medido:** [`STATUS.md`](./STATUS.md)  
+> **SSOT de Supervisión:** [`instrucciones/PROTOCOLO_SUPERVISION_ANTIGRAVITY.md`](./instrucciones/PROTOCOLO_SUPERVISION_ANTIGRAVITY.md)
 
 ---
 
@@ -42,14 +42,14 @@ No dupliques lógica ni esquemas en documentación. La única fuente de verdad e
 
 | Responsabilidad | Módulo / Clase Canónica | Ubicación |
 | :--- | :--- | :--- |
-| **Decisor Maestro de Entrada** | `MasterSnipeSignal` | [`detector/master_signal.py`](file:///D:/mejoradordebase%20de%20datos/pumpfun_detector/detector/master_signal.py) |
-| **Contrato de Salida de Decisión** | `MasterSignalDecision` (dataclass) | [`detector/master_signal.py`](file:///D:/mejoradordebase%20de%20datos/pumpfun_detector/detector/master_signal.py#L58-L68) |
+| **Decisor Maestro de Entrada** | `MasterSnipeSignal` | `detector/master_signal.py` |
+| **Contrato de Salida de Decisión** | `MasterSignalDecision` (dataclass) | `detector/master_signal.py#L58-L68` |
 | **Umbrales y Reglas Activas** | Archivo dinámico JSON | `resultados/reglas_produccion.json` |
-| **Matriz de Confluencia y GMGN Bridge** | `GMGNBridge` / `TokenBuyRecommendation` | [`detector/gmgn_bridge.py`](file:///D:/mejoradordebase%20de%20datos/pumpfun_detector/detector/gmgn_bridge.py) |
-| **Feed de Precios Real (DEX)** | `MarketFeed` (DexScreener API) | [`detector/market_feed.py`](file:///D:/mejoradordebase%20de%20datos/pumpfun_detector/detector/market_feed.py) |
-| **Paper-Forward Broker** | `LivePaperTrader` | [`detector/paper_broker.py`](file:///D:/mejoradordebase%20de%20datos/pumpfun_detector/detector/paper_broker.py) |
-| **Auditor Forense de Fallas** | `LossPostMortemLearner` | [`detector/loss_learner.py`](file:///D:/mejoradordebase%20de%20datos/pumpfun_detector/detector/loss_learner.py) |
-| **Cockpit Interactivo de Control** | Servidor HTTP / Snapshot Causal | [`cockpit/server.py`](file:///D:/mejoradordebase%20de%20datos/pumpfun_detector/cockpit/server.py) |
+| **Matriz de Confluencia y GMGN Bridge** | `GMGNBridge` / `TokenBuyRecommendation` | `detector/gmgn_bridge.py` |
+| **Feed de Precios Real (DEX)** | `MarketFeed` (DexScreener API) | `detector/market_feed.py` |
+| **Paper-Forward Broker** | `LivePaperTrader` | `detector/paper_broker.py` |
+| **Auditor Forense de Fallas** | `LossPostMortemLearner` | `detector/loss_learner.py` |
+| **Cockpit Interactivo de Control** | Servidor HTTP / Snapshot Causal | `cockpit/server.py` |
 
 ### Estructura de Decisión Canónica (`MasterSignalDecision`)
 ```python

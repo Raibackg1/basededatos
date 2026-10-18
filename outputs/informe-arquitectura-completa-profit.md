@@ -1,3 +1,12 @@
+# ⚠️ DEPRECATED — REFUTADO POR EVIDENCIA EMPÍRICA
+
+> **Este informe ha sido REFUTADO** por el barrido causal (`scripts/causal_sweep.py`).
+> Contiene cifras no validadas OOS: 81.1% WR / PF 18.93 (Rama A) y 96.8% WR / PF 242.61 (Antigravity).
+> La verdad medida: **12.55% WR / PF 0.269 / −79,771 USD** (5,021 trades, `custom.db`).
+> **No usar como evidencia de rentabilidad.** Ver `outputs/INDEX.md` y `STATUS.md`.
+
+---
+
 # Informe arquitectura completa para maximizar rentabilidad real
 
 **Alcance:** velocidad, app nativa Windows/web, lenguaje, código, base de datos, estilo, recolección, filtrado, análisis, bots, IA, repositorios open source, proyección de ganancia.  

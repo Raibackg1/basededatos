@@ -127,6 +127,330 @@ class TestSnapshot(unittest.TestCase):
         self.assertIn("delta_hit50_pct", res["edge_vs_universe"])
 
 
+def _make_perf_db(path):
+    """DB con el esquema COMPLETO de PaperPosition (reason, timestamps, pnlUsd)."""
+    con = sqlite3.connect(path)
+    con.executescript("""
+        CREATE TABLE PaperPosition(
+            mint TEXT, tokenId TEXT, pnlPct REAL, pnlUsd REAL, sizeSol REAL,
+            status TEXT, reason TEXT, exitTime REAL, entryTime REAL);
+    """)
+    now = 1_800_000_000.0
+    rows = [
+        # (mint, pnlPct, pnlUsd, reason, exitTime)
+        ("A", 120.0, 300.0, "TP", now - 10 * 86400),
+        ("B", 60.0, 150.0, "TP", now - 9 * 86400),
+        ("C", 20.0, 50.0, "BE", now - 8 * 86400),
+        ("D", -35.49, -100.0, "SL", now - 7 * 86400),
+        ("E", -35.49, -100.0, "SL", now - 55 * 86400),  # fuera de 30d
+    ]
+    for mint, pct, usd, reason, exit_t in rows:
+        con.execute(
+            "INSERT INTO PaperPosition(mint,tokenId,pnlPct,pnlUsd,sizeSol,status,reason,exitTime,entryTime)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
+            (mint, mint, pct, usd, 1.0, "CLOSED", reason, exit_t, exit_t - 3600))
+    con.execute(
+        "INSERT INTO PaperPosition(mint,tokenId,pnlPct,pnlUsd,sizeSol,status,reason,exitTime,entryTime)"
+        " VALUES(?,?,?,?,?,?,?,?,?)",
+        ("OPEN1", "OPEN1", 5.0, 10.0, 1.0, "OPEN", None, now, now - 600))
+    con.commit()
+    con.close()
+
+
+class TestPerformance(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "perf.db")
+        _make_perf_db(self.db)
+
+    def _rows(self):
+        con = snap._open_ro(self.db)
+        try:
+            return snap._scan_closed_trades(con)
+        finally:
+            con.close()
+
+    def test_compute_counts_expectancy_and_profit_factor(self):
+        rows = self._rows()
+        res = snap.compute_performance(rows, period="all")
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["n_trades"], 5)      # OPEN1 excluida
+        self.assertEqual(res["wins"], 3)
+        self.assertEqual(res["losses"], 2)
+        self.assertEqual(res["breakeven"], 0)
+        self.assertEqual(res["win_rate_pct"], 60.0)
+        # avg_win=(120+60+20)/3=66.67 ; avg_loss=-35.49 ; expectancy=0.6*66.67+0.4*-35.49
+        self.assertAlmostEqual(res["avg_win_pct"], 66.67, places=2)
+        self.assertAlmostEqual(res["avg_loss_pct"], -35.49, places=2)
+        self.assertAlmostEqual(res["expectancy_pct"], 25.8, places=1)
+        # profit factor = (120+60+20)/|(-35.49-35.49)| = 200/70.98
+        self.assertAlmostEqual(res["profit_factor"], 2.818, places=2)
+        self.assertEqual(res["net_pnl_usd"], 300.0)
+
+    def test_equity_curve_and_drawdown(self):
+        rows = self._rows()
+        res = snap.compute_performance(rows, period="all", initial_usd=10000.0)
+        eq = res["equity"]
+        self.assertEqual(eq["unit"], "usd")
+        self.assertEqual(eq["initial"], 10000.0)
+        self.assertEqual(len(eq["points"]), 5)
+        # Ordenado por exitTime ascendente: el último trade cerrado (más reciente) define la equity
+        self.assertAlmostEqual(eq["points"][-1]["value"], 10300.0, places=2)
+        # Hay un drawdown real cuando llega la primera pérdida tras el pico
+        self.assertGreater(eq["max_drawdown"], 0.0)
+
+    def test_period_filter_excludes_old_trades(self):
+        rows = self._rows()
+        now = 1_800_000_000.0
+        res = snap.compute_performance(rows, period="30d", now=now)
+        self.assertEqual(res["n_trades"], 4)      # E queda fuera (55d)
+        self.assertEqual(res["losses"], 1)
+
+    def test_millisecond_timestamps_are_normalized(self):
+        # La base canónica guarda exitTime en MILISEGUNDOS: el filtro de período
+        # debe funcionar igual que si viniera en segundos.
+        now = 1_800_000_000.0
+        rows = [
+            {"pnl_pct": 10.0, "pnl_usd": 1.0, "reason": "TP", "exit_time": (now - 3 * 86400) * 1000},
+            {"pnl_pct": -5.0, "pnl_usd": -1.0, "reason": "SL", "exit_time": (now - 40 * 86400) * 1000},
+        ]
+        res = snap.compute_performance(rows, period="30d", now=now)
+        self.assertEqual(res["n_trades"], 1)
+        self.assertEqual(res["wins"], 1)
+        self.assertLess(res["equity"]["points"][0]["t"], now)  # ya en segundos
+
+    def test_histogram_and_reason_breakdown(self):
+        rows = self._rows()
+        res = snap.compute_performance(rows, period="all")
+        self.assertTrue(res["histogram"])
+        self.assertEqual(sum(b["count"] for b in res["histogram"]), 5)
+        reasons = {b["reason"]: b["count"] for b in res["by_reason"]}
+        self.assertEqual(reasons.get("TP"), 2)
+        self.assertEqual(reasons.get("SL"), 2)
+        self.assertEqual(reasons.get("BE"), 1)
+
+    def test_pct_curve_when_usd_missing(self):
+        rows = [{"pnl_pct": 10.0, "pnl_usd": None, "reason": None, "exit_time": None}]
+        res = snap.compute_performance(rows)
+        self.assertEqual(res["equity"]["unit"], "pct")
+        self.assertIsNone(res["net_pnl_usd"])
+        self.assertFalse(res["metrics_known"]["pnl_usd"])
+
+    def test_empty_sample_is_honest(self):
+        res = snap.compute_performance([], period="all")
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["n_trades"], 0)
+        self.assertIsNone(res["win_rate_pct"])
+        self.assertIsNone(res["profit_factor"])
+        self.assertEqual(res["equity"]["points"], [])
+
+    def test_invalid_period(self):
+        res = snap.compute_performance([], period="banana")
+        self.assertFalse(res["ok"])
+        self.assertIn("period", res["error"])
+
+    def test_performance_report_missing_db(self):
+        res = snap.performance_report(os.path.join(self.tmp, "nope.db"))
+        self.assertFalse(res["ok"])
+        self.assertIn("no encontrada", res["error"])
+
+    def test_evaluate_filter_uses_measured_averages_for_ev(self):
+        # El EV ya no es un TP/SL nominal: sale de las medias reales de la muestra.
+        tokens = [(f"T{i}", 1000.0, 500.0, 2000.0, False) for i in range(4)]
+        paper = {"T0": [100.0], "T1": [50.0], "T2": [-30.0], "T3": [-10.0]}
+        res = snap.evaluate_custom_filter("x.db", tokens=tokens, paper=paper)
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["trade_wr_pct"], 50.0)
+        self.assertAlmostEqual(res["avg_win_pct"], 75.0, places=2)
+        self.assertAlmostEqual(res["avg_loss_pct"], -20.0, places=2)
+        # EV = 0.5*75 + 0.5*(-20) = 27.5  (no el 25% hardcodeado)
+        self.assertAlmostEqual(res["ev_pct"], 27.5, places=2)
+
+
+def _make_stub_view_db(path):
+    """Base con la MISMA forma parcial que produce scripts/init_pumpscope_db.py.
+
+    ``Token`` es una vista sin ``marketCap`` ni ``rise50At``: el caso que dejaba
+    el snapshot muerto (ok:false) para siempre.
+    """
+    con = sqlite3.connect(path)
+    con.executescript("""
+        CREATE TABLE tokens(mint TEXT, name TEXT, symbol TEXT, created_at TEXT,
+                            dev_wallet TEXT, total_supply INTEGER, complete INTEGER);
+        CREATE VIEW Token AS
+            SELECT mint AS id, mint, name, symbol, created_at, dev_wallet,
+                   0 AS firstMarketCap, 0 AS firstLiquidity, 0 AS currentMarketCap
+            FROM tokens;
+        CREATE TABLE PaperPosition(mint TEXT, pnlPct REAL, status TEXT, reason TEXT);
+    """)
+    for i in range(4):
+        con.execute("INSERT INTO tokens VALUES(?,?,?,?,?,?,?)",
+                    (f"STUB{i}", f"Stub {i}", f"S{i}", "2026-01-01", "dev", 1_000_000, 0))
+    con.execute("INSERT INTO PaperPosition VALUES(?,?,?,?)", ("STUB0", 50.0, "CLOSED", "TP"))
+    con.execute("INSERT INTO PaperPosition VALUES(?,?,?,?)", ("STUB1", -33.49, "CLOSED", "SL"))
+    con.commit()
+    con.close()
+
+
+class TestDbResolution(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "real.db")
+        _make_db(self.db)
+
+    def test_explicit_existing_path_wins(self):
+        res = snap.resolve_db_path(self.db)
+        self.assertTrue(res["exists"])
+        self.assertEqual(res["source"], "explicit")
+        self.assertEqual(res["path"], os.path.abspath(self.db))
+
+    def test_env_used_when_explicit_is_bogus(self):
+        bogus = os.path.join(self.tmp, "nope.db")
+        prev = os.environ.get("PUMPSCOPE_DB")
+        os.environ["PUMPSCOPE_DB"] = self.db
+        try:
+            res = snap.resolve_db_path(bogus)
+        finally:
+            if prev is None:
+                os.environ.pop("PUMPSCOPE_DB", None)
+            else:
+                os.environ["PUMPSCOPE_DB"] = prev
+        self.assertTrue(res["exists"])
+        self.assertEqual(res["source"], "env:PUMPSCOPE_DB")
+        self.assertEqual(res["path"], os.path.abspath(self.db))
+        self.assertEqual(res["tried"][0], os.path.abspath(bogus))
+
+    def test_result_is_never_a_phantom_path(self):
+        res = snap.resolve_db_path(os.path.join(self.tmp, "missing_xyz.db"))
+        self.assertEqual(res["exists"], bool(res["path"]))
+        if res["path"]:
+            self.assertTrue(os.path.exists(res["path"]))
+        self.assertTrue(res["tried"])
+
+
+class TestSchemaAdaptive(unittest.TestCase):
+    """La base parcial debe degradar con honestidad, nunca falsear un 0%."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "stub.db")
+        _make_stub_view_db(self.db)
+
+    def test_schema_report_flags_missing_columns(self):
+        rep = snap.schema_report(self.db)
+        self.assertTrue(rep["available"])
+        self.assertTrue(rep["has_token"])
+        self.assertTrue(rep["has_paper"])
+        self.assertIn("marketCap", rep["missing_token_columns"])
+        self.assertIn("rise50At", rep["missing_token_columns"])
+        self.assertEqual(rep["token_fallbacks"]["marketCap"], ["currentMarketCap"])
+        self.assertFalse(rep["rise50_measurable"])
+        self.assertTrue(rep["paper_measurable"])
+
+    def test_schema_report_missing_db(self):
+        rep = snap.schema_report(os.path.join(self.tmp, "nope.db"))
+        self.assertFalse(rep["available"])
+        self.assertIn("no encontrada", rep["error"])
+
+    def test_scan_tokens_marks_hit50_as_not_measurable(self):
+        con = snap._open_ro(self.db)
+        try:
+            tokens = snap._scan_tokens(con)
+        finally:
+            con.close()
+        self.assertEqual(len(tokens), 4)
+        for t in tokens:
+            self.assertIsNone(t[4])          # None != False
+            self.assertEqual(t[1], 0.0)      # firstMarketCap placeholder real
+
+    def test_snapshot_builds_ok_and_rise50_is_null_not_zero(self):
+        s = snap.build_snapshot(self.db, sample=10)
+        self.assertTrue(s["ok"], s.get("error"))
+        u = s["universe"]
+        self.assertEqual(u["n_tokens"], 4)
+        self.assertEqual(u["n_tokens_hit50_measurable"], 0)
+        self.assertIsNone(u["rise50_pct"])        # antes: 0.0 (falso)
+        self.assertEqual(u["paper_wr_pct"], 50.0)  # el paper SÍ es real
+        self.assertIn("db_schema", s)
+        self.assertFalse(s["db_schema"]["rise50_measurable"])
+        for seg in s["bias"]:
+            self.assertIsNone(seg["hit50_pct"])
+
+    def test_missing_token_table_reports_error_not_crash(self):
+        empty = os.path.join(self.tmp, "empty.db")
+        sqlite3.connect(empty).close()
+        s = snap.build_snapshot(empty, sample=1)
+        self.assertFalse(s["ok"])
+        self.assertTrue(s["error"])
+
+
+class TestWiringAndAutoRepair(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "t.db")
+        _make_db(self.db)
+        self.snap_path = os.path.join(self.tmp, "runtime", "snapshot.json")
+
+    def test_health_states(self):
+        state = CockpitState(self.snap_path, self.db, demo_mode=True, feed=_NullFeed())
+        self.assertEqual(state.snapshot_health()["state"], "missing")
+        snap.write_snapshot({"ok": False, "error": "veneno"}, self.snap_path)
+        self.assertEqual(state.snapshot_health()["state"], "corrupt")
+        state.rebuild()
+        self.assertEqual(state.snapshot_health()["state"], "fresh")
+
+    def test_ensure_snapshot_repairs_a_poisoned_snapshot(self):
+        snap.write_snapshot({"ok": False, "error": "veneno"}, self.snap_path)
+        state = CockpitState(self.snap_path, self.db, demo_mode=True, feed=_NullFeed())
+        result = state.ensure_snapshot()
+        self.assertTrue(result["rebuilt"])          # antes: nunca se reconstruía
+        self.assertEqual(result["was"], "corrupt")
+        self.assertTrue(result["ok"])
+        # Y queda fresco: una segunda pasada no vuelve a reconstruir
+        self.assertFalse(state.ensure_snapshot()["rebuilt"])
+
+    def test_ensure_snapshot_keeps_fresh_untouched(self):
+        state = CockpitState(self.snap_path, self.db, demo_mode=True, feed=_NullFeed())
+        state.rebuild()
+        mtime = os.path.getmtime(self.snap_path)
+        self.assertFalse(state.ensure_snapshot()["rebuilt"])
+        self.assertEqual(os.path.getmtime(self.snap_path), mtime)
+
+    def test_wiring_reports_every_subsystem(self):
+        state = CockpitState(self.snap_path, self.db, demo_mode=True, feed=_NullFeed())
+        state.rebuild()
+        w = state.wiring()
+        self.assertTrue(w["ok"])
+        self.assertEqual(w["schema"], "wiring/1")
+        self.assertEqual(w["database"]["resolved_from"], "explicit")
+        self.assertTrue(w["database"]["exists"])
+        self.assertTrue(w["database"]["read_only"])
+        self.assertEqual(w["snapshot"]["state"], "fresh")
+        self.assertEqual(w["feed"]["source"], "null")
+        self.assertIn("alive", w["loop"])
+        self.assertFalse(w["cycle"]["alive"])       # sin auto_loop no hay ciclo
+        self.assertIn("open_count", w["paper"])
+        self.assertIn("ml", w)
+
+    def test_resolve_db_switches_to_found_path(self):
+        bogus = os.path.join(self.tmp, "no-existe.db")
+        state = CockpitState(self.snap_path, bogus, demo_mode=True, feed=_NullFeed())
+        resolved = state.resolve_db()
+        self.assertTrue(resolved["exists"])
+        self.assertEqual(state.db_path, resolved["path"])
+
+    def test_cycle_thread_can_start_and_stop(self):
+        state = CockpitState(self.snap_path, self.db, demo_mode=True, feed=_NullFeed())
+        self.assertFalse(state.cycle_alive())
+        state.CYCLE_INTERVAL_S = 0.05
+        state.start_cycle_thread()
+        try:
+            self.assertTrue(state.cycle_alive())
+        finally:
+            state.stop_cycle_thread()
+        self.assertFalse(state.cycle_alive())
+
+
 class TestServer(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -158,6 +482,27 @@ class TestServer(unittest.TestCase):
         self.assertIn("Pumpfun", html)
         self.assertIn("canvas", html)
 
+    def test_probe_cockpit_detects_live_server(self):
+        from cockpit.server import probe_cockpit
+        data = probe_cockpit("127.0.0.1", self.port, timeout_s=3.0)
+        self.assertIsNotNone(data, "el sondeo debe reconocer un cockpit vivo")
+        self.assertTrue(data["ok"])
+        # Puerto sin servidor: fail-closed, no inventa un cockpit.
+        self.assertIsNone(probe_cockpit("127.0.0.1", 1, timeout_s=1.0))
+
+    def test_launcher_attaches_instead_of_double_binding(self):
+        """Instancia única: un segundo arranque sobre el mismo puerto NO duplica.
+
+        Regresión: en Windows ``SO_REUSEADDR`` permitía dos listeners en el
+        mismo puerto; el navegador recibía ERR_EMPTY_RESPONSE de forma aleatoria.
+        """
+        from cockpit import launch as launch_mod
+        code = launch_mod.main(["--headless", "--port", str(self.port),
+                                "--host", "127.0.0.1"])
+        self.assertEqual(code, 0, "debe reutilizar el cockpit vivo y salir limpio")
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/state", timeout=10) as r:
+            self.assertEqual(r.status, 200)
+
     def test_api_evaluate_endpoint(self):
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/api/evaluate",
@@ -185,6 +530,29 @@ class TestServer(unittest.TestCase):
             self.assertEqual(exc.code, 400)
             err_data = json.loads(exc.read().decode("utf-8"))
             self.assertFalse(err_data["ok"])
+
+    def test_api_wiring_endpoint(self):
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.port}/api/wiring", timeout=10) as r:
+            self.assertEqual(r.status, 200)
+            data = json.loads(r.read().decode("utf-8"))
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["schema"], "wiring/1")
+        self.assertTrue(data["database"]["exists"])
+        self.assertIn(data["snapshot"]["state"], ("fresh", "stale"))
+        self.assertIn("missing_token_columns", data["database"])
+
+    def test_api_performance_endpoint(self):
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.port}/api/performance?period=all", timeout=10) as r:
+            self.assertEqual(r.status, 200)
+            data = json.loads(r.read().decode("utf-8"))
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["n_trades"], 4)   # OPENX excluida
+        self.assertIn("equity", data)
+        self.assertIn("histogram", data)
+        self.assertIn("by_reason", data)
+        self.assertEqual(data["source"]["read_only"], True)
 
     def test_api_filter_save_and_get(self):
         payload = {"fmc_max": 3500.0, "fliq_max": 1500.0, "use_lookahead": False}

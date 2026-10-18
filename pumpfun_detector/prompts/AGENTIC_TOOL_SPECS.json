@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PumpfunCockpitAgentTools",
+  "description": "Especificación de herramientas para que agentes autónomos de IA interactúen con el Cockpit de Pumpfun",
+  "version": "2.1.0",
+  "tools": [
+    {
+      "name": "get_cockpit_state",
+      "description": "Obtiene el snapshot completo del mercado en tiempo real, métricas del radar y estado de los bucles.",
+      "endpoint": "GET /api/state",
+      "parameters": {}
+    },
+    {
+      "name": "get_bot_status",
+      "description": "Obtiene el saldo de paper trading (equity, PnL), posiciones abiertas, exposición en USD y estado del auto-sniper.",
+      "endpoint": "GET /api/bot/status",
+      "parameters": {}
+    },
+    {
+      "name": "audit_token",
+      "description": "Ejecuta una auditoría forense instantánea (ML Causal + reglas adaptativas) sobre un token por símbolo o mint.",
+      "endpoint": "POST /api/ai/audit",
+      "parameters": {
+        "mint": { "type": "string", "description": "Mint address de Solana" },
+        "symbol": { "type": "string", "description": "Símbolo del token" },
+        "market_cap_usd": { "type": "number" },
+        "liquidity_usd": { "type": "number" },
+        "dev_balance_pct": { "type": "number" },
+        "top10_concentration_pct": { "type": "number" }
+      }
+    },
+    {
+      "name": "evaluate_ai_goals",
+      "description": "Evalúa de forma autónoma las metas cuantitativas (winrate, slippage, top10) contra los datos reales medidos.",
+      "endpoint": "POST /api/ai/goal/eval",
+      "parameters": {}
+    },
+    {
+      "name": "boost_quant_model",
+      "description": "Dispara la recalibración y optimización de hiperparámetros del modelo HistGradientBoosting con datos de custom.db.",
+      "endpoint": "POST /api/ai/boost",
+      "parameters": {
+        "mode": { "type": "string", "enum": ["standard", "deep", "fast"], "default": "standard" }
+      }
+    },
+    {
+      "name": "inspect_dossier",
+      "description": "Inspecciona a fondo el contrato consultando DexScreener, RugCheck y análisis de bundler.",
+      "endpoint": "POST /api/dossier/inspect",
+      "parameters": {
+        "mint": { "type": "string", "description": "Dirección mint del token en Solana" },
+        "chain": { "type": "string", "default": "solana" }
+      }
+    },
+    {
+      "name": "get_ai_context",
+      "description": "Obtiene un resumen denso optimizado para LLMs con las variables clave de decisión del momento.",
+      "endpoint": "GET /api/ai/context",
+      "parameters": {}
+    },
+    {
+      "name": "get_ai_schema",
+      "description": "Obtiene los esquemas JSON canónicos de tokens, decisiones de señales y reglas adaptativas.",
+      "endpoint": "GET /api/ai/schema",
+      "parameters": {}
+    }
+  ]
+}

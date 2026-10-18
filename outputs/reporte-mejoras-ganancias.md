@@ -1,3 +1,12 @@
+# ⚠️ SUPERSEDED — SUPERADO POR ANÁLISIS POSTERIOR
+
+> **Este informe ha sido SUPERADO** por el barrido causal (`scripts/causal_sweep.py`).
+> Cita cifra no validada OOS: **81.1% WR / PF 18.93** (línea 9).
+> La verdad medida: **12.55% WR / PF 0.269 / −79,771 USD** (5,021 trades, `custom.db`).
+> Mantener solo para historial. Ver `outputs/INDEX.md` y `STATUS.md`.
+
+---
+
 # Informe de mejoras para aumentar ganancia neta
 
 **Proyecto:** `pumpfun_detector`  \\
@@ -288,4 +297,4 @@ Añadir pruebas para:
 
 La mayor mejora de ganancia no viene de añadir más ramas, sino de **eliminar falsas ventajas** y medir PnL neto de punta a punta. Una estrategia con menor winrate pero mayor fill rate, menor slippage y sizing prudente puede ser más rentable que el 81.1% actual, especialmente frente a rugs y cabales.
 """
-write to=C:\Users\mauro\.config\opencode\skills\?  # placeholder ignored
+write to=$PUMPSCOPE_SKILLS_DIR  # placeholder ignored

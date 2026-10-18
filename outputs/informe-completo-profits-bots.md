@@ -1,3 +1,12 @@
+# ⚠️ DEPRECATED — REFUTADO POR EVIDENCIA EMPÍRICA
+
+> **Este informe ha sido REFUTADO** por el barrido causal (`scripts/causal_sweep.py`).
+> Cita cifra no validada OOS: **81.1% WR / PF 18.93** (línea 12).
+> La verdad medida: **12.55% WR / PF 0.269 / −79,771 USD** (5,021 trades, `custom.db`).
+> **No usar como evidencia de rentabilidad.** Ver `outputs/INDEX.md` y `STATUS.md`.
+
+---
+
 # Informe completo: mejoras para aumentar ganancia neta y bots de trading / memecoins
 
 **Proyecto auditado:** `pumpfun_detector`  

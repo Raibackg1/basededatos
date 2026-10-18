@@ -125,7 +125,9 @@ def _print(cycle: Dict[str, Any]) -> None:
     u = cycle.get("universe") or {}
     s = cycle.get("sweep") or {}
     print(f"[cycle] {cycle.get('generated_at')} en {cycle.get('seconds')}s")
-    print(f"[cycle] universo: {u.get('n_tokens')} tokens | +50%={u.get('rise50_pct')}% "
+    r50 = u.get("rise50_pct")
+    r50_txt = "no medible (falta rise50At)" if r50 is None else f"{r50}%"
+    print(f"[cycle] universo: {u.get('n_tokens')} tokens | +50%={r50_txt} "
           f"| WR real={u.get('paper_wr_pct')}%")
     if s.get("ok"):
         print(f"[cycle] barrido: {s.get('n_candidates')} candidatos | "

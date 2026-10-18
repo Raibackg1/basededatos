@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from .metrics_registry import claimed_wr
+
 
 @dataclass
 class IdentifiedArchetype:
@@ -241,7 +243,7 @@ class PatternIdentifier:
             description="Sin confluencia suficiente de señal alfa ni vetos activos de alto riesgo.",
             key_signals={"market_cap": mc, "buy_sell_ratio": round(buy_sell_ratio, 2)},
             action_recommendation="MONITOR",
-            expected_winrate=0.45,
+            expected_winrate=claimed_wr("pattern_neutral_wr"),
             expected_ev=0.0,
             anti_patterns_detected=anti_patterns,
         )

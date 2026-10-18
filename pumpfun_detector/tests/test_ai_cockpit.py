@@ -165,11 +165,29 @@ class TestAIEngine(unittest.TestCase):
         self.engine._call_anthropic = lambda *a, **kw: None
         self.engine._call_ollama = lambda *a, **kw: None
         try:
-            # Pregunta sobre token
+            # Pregunta sobre token CON datos medidos (sin inyección sintética)
+            self.engine._find_token_in_db = lambda sym: {
+                "symbol": "MOCA",
+                "name": "Moca",
+                "mint": "MOCAmint1234567890abcdef",
+                "market_cap_usd": 12500.0,
+                "liquidity_usd": 3400.0,
+                "dev_balance_pct": 0.5,
+                "top10_concentration_pct": 22.0,
+            }
             res_token = self.engine.process_chat("Analiza el token MOCA")
             self.assertTrue(res_token["ok"])
             self.assertIn("moca", res_token["response"].lower())
             self.assertIn("Confluencia ML", res_token["response"])
+            self.assertIn("$12,500.00 USD", res_token["response"])
+
+            # Token AUSENTE de la base canónica: mensaje honesto, sin auditoría fabricada
+            self.engine._find_token_in_db = lambda sym: None
+            res_missing = self.engine.process_chat("Analiza el token NOEXISTE123")
+            self.assertTrue(res_missing["ok"])
+            self.assertIn("no está en la base canónica", res_missing["response"])
+            self.assertNotIn("Market Cap", res_missing["response"])
+            self.assertNotIn("Confluencia ML", res_missing["response"])
 
             # Pregunta sobre regla de slippage
             res_slip = self.engine.process_chat("Explica la regla de slippage de pánico")
@@ -192,6 +210,113 @@ class TestAIEngine(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertEqual(res["command"], "chat")
         self.assertGreater(len(res["response"]), 10)
+
+    def _mock_offline_providers(self):
+        """Fuerza la ruta de razonamiento local (determinista, sin cuotas de red)."""
+        names = (
+            "_call_openrouter",
+            "_call_gemini",
+            "_call_groq",
+            "_call_anthropic",
+            "_call_ollama",
+        )
+        originals = {name: getattr(self.engine, name) for name in names}
+        for name in names:
+            setattr(self.engine, name, lambda *a, **kw: None)
+
+        def _restore():
+            for name, func in originals.items():
+                setattr(self.engine, name, func)
+
+        return _restore
+
+    def test_general_chat_without_training_metrics_reports_nd(self):
+        """Ley anti-falacia: sin metadata medida ⇒ N/D, jamás 0.9100 ni 29,598."""
+        restore = self._mock_offline_providers()
+        try:
+            self.engine.quant_model.metadata = {}
+            res = self.engine.process_chat("Buenos días")
+        finally:
+            restore()
+        self.assertTrue(res["ok"])
+        self.assertIn("N/D — sin dato", res["response"])
+        self.assertNotIn("29,598", res["response"])
+        self.assertNotIn("0.9100", res["response"])
+
+    def test_general_chat_reports_real_training_metrics_when_measured(self):
+        restore = self._mock_offline_providers()
+        try:
+            self.engine.quant_model.metadata = {"train_samples": 12345, "test_roc_auc": 0.8765}
+            res = self.engine.process_chat("Buenos días")
+        finally:
+            restore()
+        self.assertIn("12,345", res["response"])
+        self.assertIn("0.8765", res["response"])
+
+    def test_boost_reply_never_fabricates_metrics(self):
+        """Si el boost no devuelve métricas, la respuesta muestra N/D (no 0.91/1.8s)."""
+        original = self.engine.quant_model.train_and_boost
+        self.engine.quant_model.train_and_boost = lambda **kw: {"status": "INSUFFICIENT_DATA"}
+        try:
+            res = self.engine.process_chat("/boost")
+        finally:
+            self.engine.quant_model.train_and_boost = original
+        self.assertTrue(res["ok"])
+        self.assertIn("N/D — sin dato", res["response"])
+        self.assertNotIn("0.9100", res["response"])
+        self.assertNotIn("1.80s", res["response"])
+        self.assertNotIn("29,598", res["response"])
+
+    def test_ai_context_metrics_null_when_unmeasured(self):
+        """El contexto para agentes expone null (no defaults) cuando no hay medición."""
+        self.engine.quant_model.metadata = {}
+        ctx = self.engine.get_ai_context({})
+        qm = ctx["quant_model_metadata"]
+        self.assertIsNone(qm["roc_auc"])
+        self.assertIsNone(qm["train_samples"])
+        self.assertIsNone(ctx["paper_wallet"]["equity_usd"])
+        self.assertIsNone(ctx["paper_wallet"]["total_pnl_usd"])
+
+    def test_ai_context_reports_real_metrics_when_measured(self):
+        self.engine.quant_model.metadata = {"train_samples": 12345, "test_roc_auc": 0.8765}
+        ctx = self.engine.get_ai_context(
+            {
+                "dashboard": {
+                    "paper_wallet": {
+                        "equity_usd": 250.0,
+                        "open_count": 1,
+                        "closed_count": 7,
+                        "total_pnl_usd": -12.5,
+                    }
+                }
+            }
+        )
+        qm = ctx["quant_model_metadata"]
+        self.assertEqual(qm["roc_auc"], 0.8765)
+        self.assertEqual(qm["train_samples"], 12345)
+        self.assertEqual(ctx["paper_wallet"]["equity_usd"], 250.0)
+        self.assertEqual(ctx["paper_wallet"]["total_pnl_usd"], -12.5)
+        # Alias canónico del dashboard (`pnl_usd`) también se propaga.
+        ctx_alias = self.engine.get_ai_context({"dashboard": {"paper_wallet": {"pnl_usd": 42.0}}})
+        self.assertEqual(ctx_alias["paper_wallet"]["total_pnl_usd"], 42.0)
+
+    def test_engine_source_has_no_fabricated_metric_defaults(self):
+        """Candado estático: los literales fabricados del ítem 6 no pueden volver."""
+        import inspect
+        from detector import ai_engine as ai_engine_module
+
+        src = inspect.getsource(ai_engine_module)
+        for fabricated in (
+            "0.91",
+            "29598",
+            "7500.0",
+            "2200.0",
+            "6000.0",
+            "1800.0",
+            '"top10_concentration_pct": 22.0',
+            '"dev_balance_pct": 0.5',
+        ):
+            self.assertNotIn(fabricated, src)
 
 
 class TestServerAIEndpoints(unittest.TestCase):

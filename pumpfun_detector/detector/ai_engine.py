@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -26,6 +27,49 @@ from .ai_quant_model import AIQuantModel
 from .browser_agent import BrowserAgent
 
 logger = logging.getLogger(__name__)
+
+# ── Ley anti-falacia (§1.5 AGENTS): dato no medido ⇒ "N/D — sin dato" ────────
+# Jamás fabricar métricas, precios, liquidez o holdings con literales por defecto.
+ND_METRIC = "N/D — sin dato"
+
+
+def _metric_num(value: Any) -> Optional[float]:
+    """Métrica de entrenamiento MEDIDA: numérica, finita y > 0 (0 ⇒ no medida)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return float(value)
+
+
+def _num_or_none(value: Any) -> Optional[float]:
+    """Dato de mercado MEDIDO: numérico, finito y >= 0 (0 es medición válida)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
+
+
+def _metric_str(value: Any, spec: str = ".4f") -> str:
+    """Formatea una métrica medida; si falta o es inválida ⇒ ``ND_METRIC``."""
+    num = _metric_num(value)
+    if num is None:
+        return ND_METRIC
+    try:
+        if spec.endswith("d"):
+            return format(int(num), spec)
+        return format(num, spec)
+    except (ValueError, TypeError):
+        return ND_METRIC
+
+
+def _first_field(d: Dict[str, Any], *names: str) -> Any:
+    """Primer campo presente y no nulo de ``d``; ``None`` si ninguno (sin fabricar)."""
+    for name in names:
+        if name in d and d[name] is not None:
+            return d[name]
+    return None
 
 CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -44,6 +88,24 @@ class AIEngine:
         self.browser_agent = BrowserAgent()
         self.config = self._load_config()
         self.goals: List[Dict[str, Any]] = self.config.get("goals", self._default_goals())
+        # Inyectado por el Cockpit: mismas reglas adaptativas (puerta BP-003) que el decisor.
+        self.evolution_engine: Optional[Any] = None
+
+    def _effective_decider_thresholds(self) -> Optional[Dict[str, float]]:
+        """Umbrales adaptativos desbloqueados (N≥30) o ``None`` → literales.
+
+        Debe reflejar exactamente lo que usa ``GMGNBridge`` como decisor: si el
+        chat manual auditara con umbrales distintos, mostraría una realidad falsa.
+        """
+        eng = self.evolution_engine
+        if eng is None or not hasattr(eng, "get_effective_decider_thresholds"):
+            return None
+        try:
+            meta = eng.get_effective_decider_thresholds()
+            unlocked = {k: float(v["value"]) for k, v in meta.items() if v.get("unlocked")}
+            return unlocked or None
+        except Exception:
+            return None
 
     @staticmethod
     def _default_goals() -> List[Dict[str, Any]]:
@@ -79,7 +141,9 @@ class AIEngine:
 
     def _load_config(self) -> Dict[str, Any]:
         defaults = {
-            "provider": "gemini",  # gemini, ollama, groq, anthropic
+            "provider": "gemini",  # openrouter, gemini, ollama, groq, anthropic
+            "model_openrouter": "openrouter/auto",
+            "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY", ""),
             "model_gemini": "gemini-2.5-flash",
             "gemini_api_key": os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "",
             "model_anthropic": "claude-3-haiku-20240307",
@@ -102,6 +166,8 @@ class AIEngine:
                 logger.warning("Error leyendo config de IA: %s", exc)
 
         # Sincronizar hacia variables de entorno si están configuradas
+        if defaults.get("openrouter_api_key") and not os.environ.get("OPENROUTER_API_KEY"):
+            os.environ["OPENROUTER_API_KEY"] = defaults["openrouter_api_key"]
         if defaults.get("gemini_api_key") and not os.environ.get("GEMINI_API_KEY"):
             os.environ["GEMINI_API_KEY"] = defaults["gemini_api_key"]
         if defaults.get("groq_api_key") and not os.environ.get("GROQ_API_KEY"):
@@ -115,6 +181,8 @@ class AIEngine:
         try:
             self.config.update(new_config)
             # Sincronizar llaves con os.environ
+            if "openrouter_api_key" in new_config and new_config["openrouter_api_key"]:
+                os.environ["OPENROUTER_API_KEY"] = new_config["openrouter_api_key"]
             if "gemini_api_key" in new_config and new_config["gemini_api_key"]:
                 os.environ["GEMINI_API_KEY"] = new_config["gemini_api_key"]
             if "groq_api_key" in new_config and new_config["groq_api_key"]:
@@ -145,8 +213,37 @@ class AIEngine:
         except Exception:
             return []
 
+    def fetch_openrouter_models(self, limit: int = 25) -> List[Dict[str, Any]]:
+        """Consulta en vivo el catálogo público de modelos de OpenRouter (`https://openrouter.ai/api/v1/models`)."""
+        curated = [
+            {"id": "openrouter/auto", "name": "OpenRouter Auto (Mejor Modelo Dinámico)"},
+            {"id": "deepseek/deepseek-chat:free", "name": "DeepSeek V3 Chat (Free)"},
+            {"id": "meta-llama/llama-3.3-70b-instruct:free", "name": "Llama 3.3 70B Instruct (Free)"},
+            {"id": "google/gemini-2.5-flash", "name": "Google Gemini 2.5 Flash (OpenRouter)"},
+            {"id": "anthropic/claude-3.5-sonnet", "name": "Anthropic Claude 3.5 Sonnet"},
+            {"id": "openai/gpt-4o-mini", "name": "OpenAI GPT-4o Mini"},
+        ]
+        try:
+            req = urllib.request.Request(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
+            )
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+                rows = payload.get("data") or []
+                seen = {c["id"] for c in curated}
+                for r in rows[:limit]:
+                    mid = str(r.get("id") or "")
+                    if mid and mid not in seen:
+                        curated.append({"id": mid, "name": str(r.get("name") or mid)})
+                        seen.add(mid)
+        except Exception:
+            pass
+        return curated[:limit]
+
     def get_status(self) -> Dict[str, Any]:
         """Devuelve el estado de disponibilidad y conectividad de los motores de IA."""
+        openrouter_key = self.config.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY")
         gemini_key = self.config.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         anthropic_key = self.config.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
         groq_key = self.config.get("groq_api_key") or os.environ.get("GROQ_API_KEY")
@@ -158,6 +255,12 @@ class AIEngine:
             "ok": True,
             "active_provider": self.config.get("provider", "gemini"),
             "providers": {
+                "openrouter": {
+                    "available": bool(openrouter_key),
+                    "configured": bool(openrouter_key),
+                    "has_key": bool(openrouter_key),
+                    "model": self.config.get("model_openrouter", "openrouter/auto"),
+                },
                 "gemini": {
                     "available": bool(gemini_key),
                     "configured": bool(gemini_key),
@@ -199,7 +302,9 @@ class AIEngine:
         test_prompt = "Responde exactamente 'OK: Conexión confirmada' en no más de 5 palabras."
 
         try:
-            if p == "gemini":
+            if p == "openrouter":
+                resp = self._call_openrouter(test_prompt)
+            elif p == "gemini":
                 resp = self._call_gemini(test_prompt)
             elif p == "ollama":
                 resp = self._call_ollama(test_prompt)
@@ -220,6 +325,44 @@ class AIEngine:
     # =========================================================================
     # LLM CALLER DISPATCHER
     # =========================================================================
+
+    def _call_openrouter(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
+        """Invoca la API unificada de OpenRouter (`https://openrouter.ai/api/v1/chat/completions`)."""
+        api_key = self.config.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            return None
+        model = self.config.get("model_openrouter", "openrouter/auto")
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": float(self.config.get("temperature", 0.2)),
+            "max_tokens": int(self.config.get("max_tokens", 1024)),
+        }
+        try:
+            req = urllib.request.Request(
+                "https://openrouter.ai/api/v1/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "http://127.0.0.1:8788",
+                    "X-Title": "Pumpfun Quant Cockpit",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+                choices = data.get("choices") or []
+                if choices:
+                    content = (choices[0].get("message") or {}).get("content")
+                    if content:
+                        return str(content).strip()
+        except Exception as exc:
+            logger.warning("Fallo al invocar OpenRouter (%s): %s", model, exc)
+        return None
 
     def _call_gemini(self, prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
         api_key = self.config.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -315,7 +458,11 @@ class AIEngine:
         provider = self.config.get("provider", "gemini")
 
         # 1. Probar proveedor seleccionado
-        if provider == "gemini":
+        if provider == "openrouter":
+            resp = self._call_openrouter(prompt, system_prompt)
+            if resp:
+                return resp
+        elif provider == "gemini":
             resp = self._call_gemini(prompt, system_prompt)
             if resp:
                 return resp
@@ -333,7 +480,7 @@ class AIEngine:
                 return resp
 
         # 2. Probar otros proveedores configurados
-        for alt_fn in (self._call_gemini, self._call_groq, self._call_anthropic, self._call_ollama):
+        for alt_fn in (self._call_openrouter, self._call_gemini, self._call_groq, self._call_anthropic, self._call_ollama):
             alt_resp = alt_fn(prompt, system_prompt)
             if alt_resp:
                 return alt_resp
@@ -373,14 +520,21 @@ class AIEngine:
                     if row:
                         d = dict(zip(cols, row))
                         con.close()
+                        mc = _first_field(d, "market_cap_usd", "marketCap", "currentMarketCap")
+                        if not mc:
+                            mc = _first_field(d, "firstMarketCap", "first_mc")
                         return {
-                            "symbol": str(d.get(sym_col, symbol_or_mint)).upper(),
-                            "name": d.get("name", symbol_or_mint),
-                            "mint": d.get(mint_col, "N/A"),
-                            "market_cap_usd": float(d.get("market_cap_usd") or d.get("first_mc") or 7500.0),
-                            "liquidity_usd": float(d.get("liquidity_usd") or d.get("first_liq") or 2200.0),
-                            "dev_balance_pct": float(d.get("dev_balance_pct") or 0.5),
-                            "top10_concentration_pct": float(d.get("top10_concentration_pct") or 22.0),
+                            "symbol": str(d.get(sym_col) or symbol_or_mint).upper(),
+                            "name": d.get("name") or symbol_or_mint,
+                            "mint": d.get(mint_col) or None,
+                            "market_cap_usd": mc,
+                            "liquidity_usd": _first_field(
+                                d, "liquidity_usd", "liquidity", "firstLiquidity", "first_liq"
+                            ),
+                            "dev_balance_pct": _first_field(d, "dev_balance_pct", "devBalancePct"),
+                            "top10_concentration_pct": _first_field(
+                                d, "top10_concentration_pct", "top10HoldersPct", "top10_holders_pct"
+                            ),
                         }
                 except Exception:
                     continue
@@ -400,6 +554,13 @@ class AIEngine:
     ) -> str:
         """Asistente analítico cuantitativo local que razona sobre tokens, reglas y métricas."""
         prompt_lower = prompt.lower()
+
+        # Umbrales efectivos (los mismos que el decisor; puerta BP-003 en
+        # AutoEvolutionEngine): si una regla adaptativa está desbloqueada (N≥30),
+        # el texto debe reflejarla — nunca mostrar límites desactualizados.
+        thr = self._effective_decider_thresholds() or {}
+        th_top10_txt = f"{float(thr.get('max_top10_pct') or 30.0):.1f}"
+        th_dev_txt = f"{float(thr.get('max_dev_balance_pct') or 1.5):.2f}"
 
         STOPWORDS = {
             "ANALIZA", "ANALIZAR", "AUDITA", "AUDITAR", "REVISA", "REVISAR",
@@ -431,7 +592,7 @@ class AIEngine:
         if any(w in prompt_lower for w in ("cabal", "concentracion", "concentración", "top10", "bp-005")):
             return (
                 "🔴 **Veto Anti-Cabal de Concentración (BP-005)**\n\n"
-                "• **Límite Estricto**: Top 10 holders > `30.0%` del supply.\n"
+                f"• **Límite Estricto**: Top 10 holders > `{th_top10_txt}%` del supply.\n"
                 "• Cuando las 10 billeteras principales superan este umbral, el riesgo de colusión para dumping masivo "
                 "supera el `85%` en tokens de micro-cap.\n"
                 "• El sistema aplica un veto causal inmediato e irrevocable (`BEARISH_VETO`)."
@@ -440,7 +601,7 @@ class AIEngine:
         if any(w in prompt_lower for w in ("dump", "inventario", "bp-008")) or ("dev" in prompt_lower and any(w in prompt_lower for w in ("veto", "holding", "reten", "balance", "1.5"))):
             return (
                 "⚠️ **Veto de Inventario Peligroso del Desarrollador (BP-008)**\n\n"
-                "• **Límite Estricto**: Dev Holding > `1.50%` del supply.\n"
+                f"• **Límite Estricto**: Dev Holding > `{th_dev_txt}%` del supply.\n"
                 "• Los desarrolladores que conservan más del 1.5% tienen un incentivo asimétrico para drenar la curva "
                 "de vinculación ante las primeras subidas, causando un colapso instantáneo de liquidez."
             )
@@ -486,37 +647,60 @@ class AIEngine:
                             break
 
             if cand_sym:
-                token_to_analyze = self._find_token_in_db(cand_sym) or {
-                    "symbol": cand_sym,
-                    "name": cand_sym,
-                    "market_cap_usd": 7500.0,
-                    "liquidity_usd": 2200.0,
-                    "dev_balance_pct": 0.5,
-                    "top10_concentration_pct": 22.0,
-                }
+                found = self._find_token_in_db(cand_sym)
+                if found is None:
+                    return (
+                        f"🔍 **Token `{cand_sym}` no está en la base canónica (`{ND_METRIC}`)**\n\n"
+                        "• **Ley anti-falacia (§1.5)**: sin datos on-chain no hay auditoría — "
+                        "jamás se inyectan métricas sintéticas ni valores por defecto.\n"
+                        "• Proporciona el **mint** completo o espera a que la ingesta on-chain lo indexe."
+                    )
+                token_to_analyze = found
 
         if token_to_analyze and (cand_sym or (context and context.get("selected_token")) or any(k in prompt_lower for k in ("analiz", "token", "comprar", "opinas", "veto", "score"))):
-            sym = str(token_to_analyze.get("symbol", "N/A")).upper()
-            mc = float(token_to_analyze.get("market_cap_usd", 6000.0))
-            liq = float(token_to_analyze.get("liquidity_usd", 1800.0))
-            dev = float(token_to_analyze.get("dev_balance_pct", 0.5))
-            top10 = float(token_to_analyze.get("top10_concentration_pct", 22.0))
-            mint = token_to_analyze.get("mint", "N/A")
+            sym = str(token_to_analyze.get("symbol") or "N/A").upper()
+            mc = _num_or_none(token_to_analyze.get("market_cap_usd"))
+            liq = _num_or_none(token_to_analyze.get("liquidity_usd"))
+            dev = _num_or_none(token_to_analyze.get("dev_balance_pct"))
+            top10 = _num_or_none(token_to_analyze.get("top10_concentration_pct"))
+            mint = token_to_analyze.get("mint") or "N/A"
+
+            missing = []
+            if mc is None or mc <= 0:
+                missing.append("market cap")
+            if liq is None:
+                missing.append("liquidez")
+            if dev is None:
+                missing.append("dev holding")
+            if top10 is None:
+                missing.append("top10")
+            if missing:
+                return (
+                    f"⚠️ **Auditoría `{sym}` incompleta — faltan métricas medidas**\n\n"
+                    f"• Sin dato: {', '.join(missing)} → `{ND_METRIC}`.\n"
+                    "• No se inventan valores sintéticos (ley anti-falacia §1.5): sin features "
+                    "completas no hay predicción ML honesta.\n"
+                    "• Reintenta cuando la ingesta haya completado el token."
+                )
 
             ml_eval = self.quant_model.predict_token(
                 first_mc=mc,
                 first_liq=liq,
                 dev_balance_pct=dev,
                 top10_pct=top10,
+                thresholds=self._effective_decider_thresholds(),
             )
 
+            t_used = ml_eval.get("thresholds_used") or {}
+            th_top10 = float(t_used.get("max_top10_pct", 30.0))
+            th_dev = float(t_used.get("max_dev_balance_pct", 1.5))
             status_emoji = "🟢" if ml_eval["verdict"] != "VETO" else "🔴"
             return (
                 f"{status_emoji} **Auditoría Cuantitativa Causal: `{sym}`**\n\n"
                 f"• **Mint**: `{mint[:8]}...{mint[-6:] if len(mint) > 14 else ''}`\n"
                 f"• **Market Cap**: `${mc:,.2f} USD` | **Liquidez**: `${liq:,.2f} USD` (Ratio: `{liq/max(mc,1)*100:.1f}%`)\n"
-                f"• **Concentración Top 10**: `{top10:.1f}%` ({'Seguro' if top10 <= 30 else 'VETO por Cabal'})\n"
-                f"• **Retención del Dev**: `{dev:.2f}%` ({'Seguro' if dev <= 1.5 else 'VETO por Dump'})\n"
+                f"• **Concentración Top 10**: `{top10:.1f}%` ({'Seguro' if top10 <= th_top10 else 'VETO por Cabal'})\n"
+                f"• **Retención del Dev**: `{dev:.2f}%` ({'Seguro' if dev <= th_dev else 'VETO por Dump'})\n"
                 f"• **Score de Confluencia ML**: `{ml_eval['confluence_score']}/100`\n"
                 f"• **EV Estimado con SL Real (-33.49%)**: `{ml_eval['expected_ev']}`\n"
                 f"• **Veredicto Operativo**: `{ml_eval['verdict']}`\n\n"
@@ -533,15 +717,27 @@ class AIEngine:
             )
 
         # D. Respuesta general analítica
-        auc = self.quant_model.metadata.get("test_roc_auc", 0.9100)
-        n_samples = self.quant_model.metadata.get("train_samples", 29598)
+        meta = self.quant_model.metadata or {}
+        auc_txt = _metric_str(meta.get("test_roc_auc"))
+        n_txt = _metric_str(meta.get("train_samples"), ",d")
+        if n_txt == ND_METRIC and auc_txt == ND_METRIC:
+            training_line = (
+                "El sistema está supervisando el mercado con el modelo `HistGradientBoosting`, "
+                "pero **no hay métricas de entrenamiento medidas** (`N/D — sin dato`): "
+                "el modelo aún no reportó su calibración out-of-sample."
+            )
+        else:
+            training_line = (
+                "El sistema está supervisando el mercado con el modelo `HistGradientBoosting`, "
+                f"calibrado sobre `{n_txt}` tokens históricos de `custom.db` "
+                f"(ROC-AUC out-of-sample: `{auc_txt}`)."
+            )
         return (
             "🤖 **Copiloto Cuantitativo Activo (IA Local Causal)**\n\n"
-            f"El sistema está supervisando el mercado con el modelo `HistGradientBoosting` "
-            f"entrenado sobre `{n_samples:,}` tokens históricos de `custom.db` (ROC-AUC: `{auc:.4f}`).\n\n"
+            f"{training_line}\n\n"
             "**Directivas Activas**:\n"
             "1. Slippage de pánico real calibrado a `-33.49%` (BP-001).\n"
-            "2. Vetos causales por Cabal (>30% Top10) y Dev Dumping (>1.5% Dev).\n"
+            f"2. Vetos causales por Cabal (>{th_top10_txt}% Top10) y Dev Dumping (>{th_dev_txt}% Dev).\n"
             "3. Salidas programadas: TP1 +50%, Breakeven Lock +25%, TP2 +150%.\n\n"
             "¿Deseas auditar un token específico, ejecutar `/boost` o evaluar las metas con `/goal eval`?"
         )
@@ -561,12 +757,13 @@ class AIEngine:
         top10 = float(token_data.get("top10_concentration_pct", 0.0))
         rug = float(token_data.get("rug_ratio", 0.0))
 
-        # Predicción previa del modelo cuantitativo
+        # Predicción previa del modelo cuantitativo (mismos umbrales que el decisor)
         ml_eval = self.quant_model.predict_token(
             first_mc=mc,
             first_liq=liq,
             dev_balance_pct=dev,
             top10_pct=top10,
+            thresholds=self._effective_decider_thresholds(),
         )
 
         system_prompt = (
@@ -683,14 +880,19 @@ Entrega un análisis conciso estructurado en:
                 l2_regularization=l2,
             )
 
+            acc = _metric_num(meta.get("test_accuracy"))
+            acc_txt = f"{acc * 100:.2f}%" if acc is not None else ND_METRIC
+            time_txt = _metric_str(meta.get("train_time_seconds"), ".2f")
+            time_txt = time_txt if time_txt == ND_METRIC else f"{time_txt}s"
             reply = (
-                f"🚀 **Modelo Cuantitativo ML Recalibrado con Éxito (/boost)**\n\n"
+                f"🚀 **Modelo Cuantitativo ML Recalibrado (/boost)**\n\n"
                 f"• **Algoritmo**: HistGradientBoostingClassifier (Scikit-Learn)\n"
-                f"• **Tokens de Entrenamiento**: {meta.get('train_samples', 0):,} ejemplos de `custom.db`\n"
-                f"• **Tokens de Validación Sellada**: {meta.get('test_samples', 0):,}\n"
-                f"• **ROC-AUC Out-Of-Sample**: `{meta.get('test_roc_auc', 0.91):.4f}`\n"
-                f"• **Precisión de Clasificación**: `{meta.get('test_accuracy', 0.91)*100:.2f}%`\n"
-                f"• **Tiempo de Entrenamiento**: `{meta.get('train_time_seconds', 1.8):.2f}s`\n"
+                f"• **Estado**: `{meta.get('status') or ND_METRIC}`\n"
+                f"• **Tokens de Entrenamiento**: `{_metric_str(meta.get('train_samples'), ',d')}` ejemplos de `custom.db`\n"
+                f"• **Tokens de Validación Sellada**: `{_metric_str(meta.get('test_samples'), ',d')}`\n"
+                f"• **ROC-AUC Out-Of-Sample**: `{_metric_str(meta.get('test_roc_auc'))}`\n"
+                f"• **Precisión de Clasificación**: `{acc_txt}`\n"
+                f"• **Tiempo de Entrenamiento**: `{time_txt}`\n"
                 f"• **Hiperparámetros**: `iter={max_iter}`, `depth={max_depth}`, `lr={lr}`, `l2={l2}`\n\n"
                 f"Los scores de confluencia de todos los tokens en el radar han sido recalculados con el nuevo vector de pesos."
             )
@@ -823,13 +1025,49 @@ Entrega un análisis conciso estructurado en:
                 "data": res,
             }
 
-        # 4. CHAT GENERAL CON LA IA
+        # 4. COMANDO /evolve y /shadow (Auto-Mejora Post-Mortem y Libro Contrafactual de Vetos)
+        if msg.lower().startswith(("/evolve", "/shadow")):
+            cmd_name = "shadow" if msg.lower().startswith("/shadow") else "evolve"
+            evo_data = (context or {}).get("evolution_status") or {}
+            rules = evo_data.get("adaptive_rules") or {}
+            sh_sum = evo_data.get("shadow_summary") or {}
+            sh_rows = (evo_data.get("shadow_vetos") or [])[:5]
+            evo_events = (evo_data.get("evolution_events") or [])[:5]
+
+            sh_lines = "\n".join(
+                f"• **{r.get('symbol', 'TOK')}** (`{r.get('verdict', 'PENDING')}` · `{r.get('counterfactual_pnl_pct', 0.0):+.1f}%`): {r.get('summary_text', '')}"
+                for r in sh_rows
+            ) or "• _Monitoreando vetos recientes en tiempo real..._"
+
+            evo_lines = "\n".join(
+                f"• **{e.get('symbol', 'TOK')}** (`{e.get('pnl_pct', 0.0):+.1f}%`): {e.get('diagnosis', '')} ({e.get('notes', '')})"
+                for e in evo_events
+            ) or "• _Esperando cierres Paper para ajuste adaptativo automático._"
+
+            reply = (
+                f"🧬 **Motor de Auto-Evolución y Contrafactual de Sombra (`/{cmd_name}`)**\n\n"
+                f"**1. Libro de Sombra (¿Ese trade vetado hubiera ganado o perdido?)**:\n"
+                f"• Vetos Auditados: `{sh_sum.get('total_tracked', 0)}` | Salvadas Reales (`TRUE_SAVE`): `{sh_sum.get('true_saves', 0)}` | Falsos Vetos (`FALSE_VETO`): `{sh_sum.get('false_vetos', 0)}`\n"
+                f"• Precisión de Salvada: `{sh_sum.get('save_accuracy_pct', 100.0):.1f}%` | Pérdida Acumulada Evitada: `-{sh_sum.get('avoided_loss_sum_pct', 0.0):.1f}%`\n"
+                f"{sh_lines}\n\n"
+                f"**2. Reglas Adaptativas Auto-Calibradas Post-Trade**:\n"
+                f"• Liquidez Mínima: `${rules.get('min_liquidity_usd', 8500):,.0f}` | Top 10 Flotante Máx: `{rules.get('max_top10_float_pct', 28.0)}%` | Bundler Máx: `{rules.get('max_bundler_pct', 18.0)}%` | Ticket 5m Mín: `${rules.get('min_avg_tx_m5_usd', 5.5)}`\n"
+                f"{evo_lines}"
+            )
+            return {
+                "ok": True,
+                "command": cmd_name,
+                "response": reply,
+                "data": evo_data,
+            }
+
+        # 5. CHAT GENERAL CON LA IA
         system_prompt = (
             "Eres el Copiloto de Inteligencia Artificial del Pumpfun Cockpit. "
             "Eres un analista cuantitativo riguroso de microestructura en Solana. "
             "Responde de forma concisa, técnica y accionable en español. "
             "Puedes recomendar tokens con EV positivo, explicar causas de veto por rug, "
-            "o sugerir el uso de /boost, /goal y /browser."
+            "o sugerir el uso de /boost, /goal, /evolve, /shadow y /browser."
         )
 
         ctx_str = ""
@@ -842,3 +1080,71 @@ Entrega un análisis conciso estructurado en:
             "command": "chat",
             "response": reply,
         }
+
+    def get_ai_context(self, system_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Genera un contexto denso, estructurado y optimizado en tokens para LLMs."""
+        state = system_state or {}
+        dash = state.get("dashboard", {}) if isinstance(state.get("dashboard"), dict) else {}
+        wallet = dash.get("paper_wallet", {}) if isinstance(dash.get("paper_wallet"), dict) else {}
+        evo = dash.get("evolution", {}) if isinstance(dash.get("evolution"), dict) else {}
+
+        top_candidates = (state.get("tokens", []) or [])[:5]
+        cand_summary = [
+            {
+                "symbol": t.get("symbol"),
+                "mint": (t.get("mint", "") or "")[:8] + "...",
+                "mc_usd": t.get("market_cap_usd"),
+                "liq_usd": t.get("liquidity_usd"),
+                "confluence_score": t.get("confluence_score"),
+                "verdict": t.get("verdict", "NEUTRAL"),
+                "veto_reason": t.get("veto_reason"),
+            }
+            for t in top_candidates if isinstance(t, dict)
+        ]
+
+        qmeta = self.quant_model.metadata or {}
+        roc_auc = _metric_num(qmeta.get("test_roc_auc"))
+        n_train = _metric_num(qmeta.get("train_samples"))
+
+        return {
+            "version": "2.1.0",
+            "market_regime": "DRY_RUN_FORWARD",
+            "active_rules_ssot": "BP-001 (SL -33.49%), BP-005 (Top10 <30%), BP-008 (Dev <1.5%)",
+            "paper_wallet": {
+                "equity_usd": wallet.get("equity_usd"),
+                "open_count": wallet.get("open_count"),
+                "closed_count": wallet.get("closed_count"),
+                # Alias canónico: el dashboard publica `pnl_usd`; `total_pnl_usd`
+                # se mantiene por compatibilidad de contrato con los agentes.
+                "total_pnl_usd": wallet.get("total_pnl_usd", wallet.get("pnl_usd")),
+            },
+            "evolution_engine": {
+                "true_saves": evo.get("true_saves"),
+                "false_vetos": evo.get("false_vetos"),
+                "adaptive_rules": evo.get("adaptive_rules"),
+            },
+            "top_screened_tokens": cand_summary,
+            "quant_model_metadata": {
+                "algorithm": qmeta.get("algorithm", "HistGradientBoostingClassifier"),
+                "roc_auc": roc_auc,
+                "train_samples": int(n_train) if n_train is not None else None,
+            },
+            "active_llm_provider": self.config.get("provider", "gemini"),
+            "timestamp": time.time(),
+        }
+
+    def get_ai_schemas(self) -> Dict[str, Any]:
+        """Devuelve los esquemas canónicos de datos de la plataforma."""
+        specs_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "prompts",
+            "AGENTIC_TOOL_SPECS.json",
+        )
+        if os.path.exists(specs_path):
+            try:
+                with open(specs_path, "r", encoding="utf-8") as fh:
+                    return json.load(fh)
+            except Exception as e:
+                logger.warning(f"Error cargando specs: {e}")
+        return {"error": "Specs not found"}
+

@@ -93,7 +93,7 @@ class TestPumpfunDetectorEngine(unittest.TestCase):
         self.assertIn("DEAD_LAUNCH", dec_dead.veto_reason)
 
         # 2. Dev Dump VETO
-        dec_dev = MasterSnipeSignal.evaluate({"marketCap": 6000.0, "firstMarketCap": 4000.0, "firstLiquidity": 1200.0, "devBalancePct": 2.5})
+        dec_dev = MasterSnipeSignal.evaluate({"marketCap": 6000.0, "firstMarketCap": 6000.0, "firstLiquidity": 1200.0, "devBalancePct": 2.5})
         self.assertFalse(dec_dev.admitted)
         self.assertEqual(dec_dev.branch, "VETO")
         self.assertIn("DEV_DUMP", dec_dev.veto_reason)

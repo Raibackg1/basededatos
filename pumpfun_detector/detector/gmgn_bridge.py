@@ -32,6 +32,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .ai_quant_model import AIQuantModel
+from .auto_evolution import AutoEvolutionEngine
+from .gmgn_dossier_scanner import GMGNDossierScanner
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,191 @@ class TokenBuyRecommendation:
     tp_targets: Dict[str, float]
     sl_target: float
     metrics_known: bool = True
+    bundler_pct: float = 0.0
+    wash_trading_flag: bool = False
+    clone_factory_flag: bool = False
+    dev_factory_flag: bool = False
+    avg_tx_m5_usd: float = 0.0
+    same_name_count: int = 1
+    why_price_moves: str = ""
+    actionable_playbook: str = ""
+
+
+# ---------------------------------------------------------------------------
+# P1 — Trazas de decisión (E0→E6): espejo fiel de la cadena elif de
+# ``AIQuantModel.predict_token``. Orden importa: primero-que-falla-manda; luego
+# del primer veto, las etapas restantes quedan "skip" porque la realidad es que
+# el código NO las ejecutó (no se inventan evaluaciones que no ocurrieron).
+# ---------------------------------------------------------------------------
+
+_VETO_STAGE_BY_PATTERN = {
+    "UNVERIFIED_SECURITY_TRAP": "E1_metrics_known",
+    "BUNDLER_UNIFORM_TRAP": "E3_bundler",
+    "DEV_FACTORY_RUGGER": "E3_dev_factory",
+    "WASH_TRADING_STAIRCASE": "E3_wash_trading",
+    "CLONE_VAMP_DERIVATIVE": "E3_clone_factory",
+    "DEV_DUMP_RISK": "E3_dev_holding",
+    "CABAL_CONCENTRATION": "E3_cabal_top10",
+    "ILLIQUID_SLIPPAGE_TRAP": "E3_liquidity_ratio",
+}
+
+# (stage, etiqueta humana) en el orden real de la cadena elif.
+_E3_STAGE_ORDER = (
+    ("E3_bundler", "Bundler / snipers bloque 0"),
+    ("E3_dev_factory", "Fábrica serial del dev"),
+    ("E3_wash_trading", "Wash-trading en escalera"),
+    ("E3_clone_factory", "Clon homónimo / vamp"),
+    ("E3_dev_holding", "Dev holding"),
+    ("E3_cabal_top10", "Concentración top-10 (Cabal)"),
+    ("E3_liquidity_ratio", "Ratio liquidez / market cap"),
+)
+
+
+def _stage_float(val: Any) -> Optional[float]:
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_decision_stages(
+    source: str,
+    mint: str,
+    symbol: str,
+    mc_usd: float,
+    liq_usd: float,
+    metrics_known: bool,
+    bundler_pct: float,
+    wash_trading_flag: bool,
+    clone_factory_flag: bool,
+    dev_factory_flag: bool,
+    dev_balance_pct: float,
+    top10_pct: float,
+    ml_eval: Dict[str, Any],
+    thresholds_meta: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Convierte la evaluación real (features + ``ml_eval``) en etapas legibles.
+
+    ``thresholds_meta`` (salida de ``get_effective_decider_thresholds``) declara
+    qué umbrales están desbloqueados por la puerta BP-003 (N≥30): la traza muestra
+    el umbral EFECTIVO usado y su procedencia (``default_literal`` vs
+    ``adaptive_rule``), sin inventar evaluaciones.
+
+    Devuelve una lista de dicts con el contrato de ``decision_traces``:
+    ``stage, value, threshold, operator, verdict(pass|fail|skip|info), reason,
+    source, source_kind``.
+    """
+    mc_usd = _stage_float(mc_usd) or 0.0
+    liq_usd = _stage_float(liq_usd) or 0.0
+    liq_ratio = liq_usd / max(mc_usd, 1.0)
+    ml_eval = ml_eval or {}
+
+    # Umbrales EFECTIVOS (los devuelve predict_token) + procedencia por regla.
+    used = ml_eval.get("thresholds_used")
+    used = used if isinstance(used, dict) else {}
+
+    def _used_thr(key: str, default: float) -> float:
+        v = _stage_float(used.get(key))
+        return v if v is not None else default
+
+    meta = thresholds_meta if isinstance(thresholds_meta, dict) else {}
+
+    def _thr_source(decider_key: Optional[str]):
+        if decider_key:
+            entry = meta.get(decider_key)
+            if isinstance(entry, dict) and entry.get("unlocked"):
+                return "adaptive_rules.json", "adaptive_rule"
+        return "regla_forense", "default_literal"
+
+    pattern_id = str(ml_eval.get("pattern_id") or "")
+    admitted = bool(ml_eval.get("admitted"))
+    is_veto = str(ml_eval.get("verdict") or "") == "VETO"
+    fail_stage: Optional[str] = _VETO_STAGE_BY_PATTERN.get(pattern_id) if is_veto else None
+    if fail_stage is None and not is_veto and not admitted:
+        fail_stage = "E4_ev_net"
+
+    def _mk(stage, value, threshold, operator, verdict, reason, src, kind):
+        return {
+            "stage": stage, "value": value, "threshold": threshold,
+            "operator": operator, "verdict": verdict, "reason": reason,
+            "source": src, "source_kind": kind,
+        }
+
+    stages: List[Dict[str, Any]] = [
+        _mk("E0_discovery", round(mc_usd, 2), None, None, "info",
+            f"{symbol or mint} · MC ${mc_usd:,.0f} · liq ${liq_usd:,.0f} · ratio {liq_ratio*100:.1f}%",
+            str(source or "desconocido"), "feed")
+    ]
+
+    # E1 — métricas verificadas (fail-closed)
+    if fail_stage == "E1_metrics_known":
+        stages.append(_mk("E1_metrics_known", 0.0, 1.0, "==", "fail",
+                          str(ml_eval.get("veto_reason") or "VETO_UNVERIFIED_METRICS"),
+                          "regla_fail_closed", "default_literal"))
+    else:
+        stages.append(_mk("E1_metrics_known", 1.0 if metrics_known else 0.0, 1.0, "==",
+                          "pass" if metrics_known else "skip",
+                          "métricas on-chain verificadas" if metrics_known else "sin verificar",
+                          "regla_fail_closed", "default_literal"))
+
+    # E3 — cadena de escudos forenses (orden real; despues del primer fail → skip)
+    values = {
+        "E3_bundler": (round(_stage_float(bundler_pct) or 0.0, 2),
+                       _used_thr("max_bundler_pct", 20.0), "<=", "max_bundler_pct"),
+        "E3_dev_factory": (1.0 if dev_factory_flag else 0.0, 0.0, "==", None),
+        "E3_wash_trading": (1.0 if wash_trading_flag else 0.0, 0.0, "==", None),
+        "E3_clone_factory": (1.0 if clone_factory_flag else 0.0, 0.0, "==", None),
+        "E3_dev_holding": (round(_stage_float(dev_balance_pct) or 0.0, 2),
+                           _used_thr("max_dev_balance_pct", 1.5), "<=", "max_dev_balance_pct"),
+        "E3_cabal_top10": (round(_stage_float(top10_pct) or 0.0, 2),
+                           _used_thr("max_top10_pct", 30.0), "<=", "max_top10_pct"),
+        "E3_liquidity_ratio": (round(liq_ratio, 4),
+                               _used_thr("min_liq_ratio", 0.15), ">=", "min_liq_ratio"),
+    }
+    after_fail = fail_stage == "E1_metrics_known"
+    for stage_name, label in _E3_STAGE_ORDER:
+        value, threshold, operator, decider_key = values[stage_name]
+        src, kind = _thr_source(decider_key)
+        if after_fail:
+            stages.append(_mk(stage_name, value, threshold, operator, "skip",
+                              f"no evaluado: veto previo", src, kind))
+        elif stage_name == fail_stage:
+            stages.append(_mk(stage_name, value, threshold, operator, "fail",
+                              str(ml_eval.get("veto_reason") or label), src, kind))
+            after_fail = True
+        else:
+            stages.append(_mk(stage_name, value, threshold, operator, "pass",
+                              f"{label}: {value} {operator} {threshold} (OK)", src, kind))
+
+    # E4 — puerta de EV neto (admisión estricta: EV > 0)
+    ev_fraction = _stage_float(ml_eval.get("ev_fraction"))
+    if fail_stage == "E4_ev_net":
+        stages.append(_mk("E4_ev_net", ev_fraction, 0.0, ">", "fail",
+                          f"EV neto {ml_eval.get('expected_ev', 'N/D')} ≤ 0 (no admisible)",
+                          "modelo+costes", "model"))
+    elif after_fail:
+        stages.append(_mk("E4_ev_net", ev_fraction, 0.0, ">", "skip",
+                          "no evaluado: veto previo", "modelo+costes", "model"))
+    else:
+        stages.append(_mk("E4_ev_net", ev_fraction, 0.0, ">", "pass",
+                          f"EV neto {ml_eval.get('expected_ev', 'N/D')} > 0 tras costes",
+                          "modelo+costes", "model"))
+
+    # E4b — probabilidad ML (informativa: define arquetipo, no admite sola)
+    prob = _stage_float(ml_eval.get("probability_success"))
+    stages.append(_mk("E4_ml_probability", prob, 0.65, ">=", "info",
+                      f"P(éxito) {(prob or 0.0)*100:.1f}% · arquetipo {pattern_id} "
+                      f"({ml_eval.get('pattern_label', '')}); fuerte ≥65%, especulativo ≥50%",
+                      "modelo:HistGradientBoosting", "model"))
+
+    # E5 — veredicto final
+    stages.append(_mk("E5_verdict", _stage_float(ml_eval.get("confluence_score")), None, None, "info",
+                      f"{ml_eval.get('verdict', 'N/D')} · "
+                      f"{ml_eval.get('veto_reason') or ml_eval.get('causal_trigger') or 'sin confluencia'}",
+                      "modelo+reglas", "model"))
+    return stages
 
 
 @dataclass
@@ -129,19 +316,70 @@ class LivePaperTrader:
     """
 
     ORIGIN = "cockpit_forward"
+    # Puerta BP-003: el auto-/boost ML se gatilla récord de cierres {30, 60, 90…},
+    # nunca con muestras menores (misma ley N≥30 que los umbrales adaptativos).
+    AUTO_BOOST_EVERY_N = 30
 
     def __init__(self, sol_price_usd: float = 150.0, feed: Optional[Any] = None,
-                 store: Optional[Any] = None, origin: str = ORIGIN):
+                 store: Optional[Any] = None, origin: str = ORIGIN,
+                 evolution_engine: Optional[AutoEvolutionEngine] = None,
+                 quant_model: Optional[Any] = None):
         self.sol_price_usd = sol_price_usd
         self.feed = feed
         self.store = store
         self.origin = origin
+        self.evolution_engine = evolution_engine
+        self.quant_model = quant_model  # inyectado por GMGNBridge (auto-/boost ML)
         self.auto_bot_enabled = True
+        self.stall_timeout_sec = 300.0
         self.open_positions: Dict[str, PaperPositionState] = {}
         self.closed_positions: List[PaperPositionState] = []
         self._decision_ids: Dict[str, Optional[int]] = {}
         self.feed_misses = 0
         self.last_feed_error: Optional[str] = None
+        self.last_evolution_event: Optional[Dict[str, Any]] = None
+        self.last_auto_boost: Optional[Dict[str, Any]] = None
+
+    def _persist_position(self, pos: PaperPositionState) -> None:
+        if self.store is not None and hasattr(self.store, "save_paper_position"):
+            try:
+                self.store.save_paper_position(asdict(pos))
+            except Exception:
+                pass
+
+    def restore_from_store(self) -> int:
+        """Restaura posiciones abiertas y cerradas desde SQLite tras un reinicio."""
+        if self.store is None or not hasattr(self.store, "load_paper_positions"):
+            return 0
+        rows = self.store.load_paper_positions(limit=200)
+        restored = 0
+        for r in rows:
+            try:
+                pos = PaperPositionState(
+                    id=str(r.get("id", "POS-0")),
+                    mint=str(r.get("mint", "")),
+                    symbol=str(r.get("symbol", "UNKNOWN")),
+                    entry_mc=float(r.get("entry_mc", 0.0)),
+                    current_mc=float(r.get("current_mc", 0.0)),
+                    size_sol=float(r.get("size_sol", 1.0)),
+                    pnl_pct=float(r.get("pnl_pct", 0.0)),
+                    pnl_usd=float(r.get("pnl_usd", 0.0)),
+                    opened_at=float(r.get("opened_at", time.time())),
+                    status=str(r.get("status", "OPEN")),
+                    exit_reason=r.get("exit_reason"),
+                    tp1_hit=bool(r.get("tp1_hit", False)),
+                    be_hit=bool(r.get("be_hit", False)),
+                    tp2_hit=bool(r.get("tp2_hit", False)),
+                    peak_mc=float(r.get("peak_mc", r.get("entry_mc", 0.0))),
+                )
+                if pos.status == "OPEN" and pos.mint:
+                    self.open_positions[pos.mint] = pos
+                else:
+                    self.closed_positions.append(pos)
+                restored += 1
+            except Exception:
+                continue
+        return restored
 
     def open_trade(self, mint: str, symbol: str, entry_mc: float, size_sol: float = 1.0) -> PaperPositionState:
         pos = PaperPositionState(
@@ -158,6 +396,7 @@ class LivePaperTrader:
             peak_mc=entry_mc,
         )
         self.open_positions[mint] = pos
+        self._persist_position(pos)
         # Persiste la decisión (paper) para que el outcome real quede auditable.
         decision_id = None
         if self.store is not None and hasattr(self.store, "record_decision"):
@@ -178,24 +417,67 @@ class LivePaperTrader:
             pos.status = "CLOSED"
             pos.exit_reason = reason
             self.closed_positions.append(pos)
+            self._persist_position(pos)
             decision_id = self._decision_ids.pop(mint, None)
+            pnl_sol = pos.pnl_pct / 100.0 * pos.size_sol
             if decision_id is not None and self.store is not None \
                     and hasattr(self.store, "record_outcome"):
-                pnl_sol = pos.pnl_pct / 100.0 * pos.size_sol
                 try:
                     self.store.record_outcome(
                         decision_id, pos.pnl_pct, pnl_sol,
                         exit_reason=reason, resolved_at=time.time())
                 except Exception:
                     pass
+            if self.evolution_engine is not None:
+                try:
+                    pos_payload = asdict(pos)
+                    pos_payload["realized_pnl_sol"] = round(pnl_sol, 4)
+                    pos_payload["entry_mc_usd"] = pos.entry_mc
+                    dossier_dict = (
+                        self.store.get_token_dossier(mint)
+                        if (self.store is not None and hasattr(self.store, "get_token_dossier"))
+                        else None
+                    )
+                    self.last_evolution_event = self.evolution_engine.diagnose_and_learn_from_closed_trade(
+                        pos_dict=pos_payload,
+                        dossier_dict=dossier_dict,
+                    )
+                except Exception as exc:
+                    logger.debug("Fallo en post-mortem automático: %s", exc)
+            # Auto-/boost ML (N≥30) tras cada hito de cierres paper.
+            self._maybe_auto_boost()
             return pos
         return None
 
+    def _maybe_auto_boost(self) -> None:
+        """Recalibra ``AIQuantModel`` cada ``AUTO_BOOST_EVERY_N`` cierres forward.
+
+        Sólo dispara con modelo inyectado y en múltiplos exactos (30, 60, 90…).
+        El resultado queda declarado en ``last_auto_boost`` — éxito o error,
+        nunca silencio (anti-falacia).
+        """
+        n_closed = len(self.closed_positions)
+        if n_closed == 0 or n_closed % self.AUTO_BOOST_EVERY_N != 0:
+            return
+        if self.last_auto_boost is not None and self.last_auto_boost.get("at_n") == n_closed:
+            return
+        if self.quant_model is None or not hasattr(self.quant_model, "train_and_boost"):
+            return
+        try:
+            self.quant_model.train_and_boost()
+            self.last_auto_boost = {"at_n": n_closed, "ts": round(time.time(), 2), "ok": True}
+            logger.info("Auto-/boost ML tras %d cierres paper (recalibración completa)", n_closed)
+        except Exception as exc:
+            self.last_auto_boost = {"at_n": n_closed, "ts": round(time.time(), 2),
+                                    "ok": False, "error": str(exc)}
+            logger.warning("Auto-/boost ML falló tras %d cierres: %s", n_closed, exc)
+
     def tick_prices(self) -> None:
-        """Actualiza con precios REALES y evalúa salidas (TP1 +50%, BE +25%, TP2 +150%, SL -33.49%).
+        """Actualiza con precios REALES y evalúa salidas (TP1 +50%, BE +25%, Peak Trailing, Stall, TP2 +150%, SL -33.49%).
 
         Sin feed, o sin dato real para el mint, la posición NO se mueve.
         """
+        now = time.time()
         for mint, pos in list(self.open_positions.items()):
             if pos.entry_mc <= 0:
                 continue
@@ -209,6 +491,7 @@ class LivePaperTrader:
             pos.peak_mc = max(pos.peak_mc, pos.current_mc)
             pos.pnl_pct = round(((pos.current_mc - pos.entry_mc) / pos.entry_mc) * 100.0, 2)
             pos.pnl_usd = round((pos.pnl_pct / 100.0) * (pos.size_sol * self.sol_price_usd), 2)
+            self._persist_position(pos)
 
             # Lógica de salidas disciplinadas:
             # 1. Breakeven Lock al +25%
@@ -221,11 +504,23 @@ class LivePaperTrader:
             if pos.pnl_pct >= 150.0:
                 self.close_trade(mint, reason="TP2_RUNNER_150%_TAKEN")
                 continue
-            # 4. Stop Loss de Pánico (-33.49%) o Reversión de Breakeven (+5%)
+            # 4. Peak Trailing Stop: tras alcanzar TP1 (+50%), si retrocede >= 18% desde peak_mc asegura ganancia
+            if pos.tp1_hit and pos.peak_mc > pos.entry_mc * 1.45:
+                drop_from_peak_pct = ((pos.peak_mc - pos.current_mc) / max(pos.peak_mc, 1.0)) * 100.0
+                if drop_from_peak_pct >= 18.0 and pos.pnl_pct > 5.0:
+                    self.close_trade(mint, reason="PEAK_TRAILING_STOP_PROFIT_LOCKED")
+                    continue
+            # 5. Stop Loss de Pánico (-33.49%) o Reversión de Breakeven (+5%)
             if pos.be_hit and pos.pnl_pct <= 5.0:
                 self.close_trade(mint, reason="BREAKEVEN_LOCK_+5%_SECURED")
+                continue
             elif pos.pnl_pct <= -33.49:
                 self.close_trade(mint, reason="PANIC_SL_SLIPPAGE_EXIT")
+                continue
+            # 6. Stall Timeout Exit (300s sin alcanzar +6% ni TP1)
+            elapsed = now - float(pos.opened_at or now)
+            if elapsed >= self.stall_timeout_sec and not pos.tp1_hit and -28.0 < pos.pnl_pct < 6.0:
+                self.close_trade(mint, reason="STALL_TIMEOUT_EXIT")
 
     def get_summary(self) -> Dict[str, Any]:
         all_closed = self.closed_positions
@@ -243,10 +538,12 @@ class LivePaperTrader:
             "total_pnl_sol": round(total_pnl_sol, 3),
             "total_pnl_usd": round(total_pnl_usd, 2),
             "open_positions": [asdict(p) for p in self.open_positions.values()],
-            "recent_closed": [asdict(p) for p in all_closed[-5:]],
+            "recent_closed": [asdict(p) for p in all_closed[-8:]],
             "feed": self.feed.health() if self.feed is not None else {"source": None},
             "feed_misses": self.feed_misses,
             "last_feed_error": self.last_feed_error,
+            "last_evolution_event": self.last_evolution_event,
+            "last_auto_boost": self.last_auto_boost,
         }
         # Auditoría NETA persistida (aislada por origin). Solo si hay store.
         if self.store is not None and hasattr(self.store, "net_audit"):
@@ -263,7 +560,8 @@ class GMGNBridge:
 
     def __init__(self, cli_path: Optional[str] = None, feed: Optional[Any] = None,
                  store: Optional[Any] = None, demo_mode: bool = False,
-                 use_db_fallback: bool = False):
+                 use_db_fallback: bool = False,
+                 evolution_engine: Optional[AutoEvolutionEngine] = None):
         self.cli_path = cli_path or self._resolve_cli()
         self.api_key = os.environ.get("GMGN_API_KEY")
         self.feed = feed
@@ -271,7 +569,12 @@ class GMGNBridge:
         self.demo_mode = bool(demo_mode)
         self.use_db_fallback = bool(use_db_fallback)
         self.quant_model = AIQuantModel()
-        self.paper_trader = LivePaperTrader(feed=feed, store=store)
+        self.dossier_scanner = GMGNDossierScanner(store=store)
+        self.evolution_engine = evolution_engine or (AutoEvolutionEngine(store=store) if store is not None else None)
+        self.paper_trader = LivePaperTrader(
+            feed=feed, store=store, evolution_engine=self.evolution_engine,
+            quant_model=self.quant_model,
+        )
         self.last_screen_source: Optional[str] = None
         self._check_global_env()
 
@@ -295,9 +598,9 @@ class GMGNBridge:
         if cmd:
             return cmd
         win_candidates = [
-            r"C:\Users\mauro\AppData\Roaming\npm\gmgn-cli.cmd",
+            os.environ.get("GMGN_CLI_PATH", ""),
             os.path.expandvars(r"%APPDATA%\npm\gmgn-cli.cmd"),
-            r"C:\Users\mauro\.gemini\antigravity\bin\gmgn-cli.cmd",
+            os.environ.get("GMGN_CLI_GEMINI_PATH", ""),
             os.path.expanduser(r"~/.gemini/antigravity/bin/gmgn-cli.cmd"),
         ]
         for c in win_candidates:
@@ -421,7 +724,7 @@ class GMGNBridge:
 
     def _load_wallets_from_db(self) -> List[Dict[str, Any]]:
         db_paths = [
-            r"D:\hjh\pumpscope\db\custom.db",
+            os.environ.get("PUMPSCOPE_DB", "custom.db"),
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo_pumpfun.db"),
         ]
         for path in db_paths:
@@ -620,7 +923,7 @@ class GMGNBridge:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         parent_dir = os.path.dirname(base_dir)
         db_paths = [
-            r"D:\hjh\pumpscope\db\custom.db",
+            os.environ.get("PUMPSCOPE_DB", "custom.db"),
             os.path.join(base_dir, "demo_pumpfun.db"),
             os.path.join(parent_dir, "demo_pumpfun.db"),
             os.path.join(base_dir, "cockpit", "runtime", "cockpit_forward.db"),
@@ -716,7 +1019,7 @@ class GMGNBridge:
         return []
 
     def screen_tokens_to_buy(
-        self, chain: str = "sol", max_tokens: int = 10
+        self, chain: str = "sol", max_tokens: int = 10, enrich_live_dossiers: bool = False
     ) -> List[TokenBuyRecommendation]:
         candidates: List[Dict[str, Any]] = []
         source: Optional[str] = None
@@ -743,6 +1046,35 @@ class GMGNBridge:
             candidates = self._load_tokens_from_db(max_tokens)
             if candidates:
                 source = "custom_db"
+
+        # Enriquecimiento forense multi-fuente en vivo (RugCheck / GoPlus / Clones) para candidatos descubiertos
+        if enrich_live_dossiers and candidates and self.dossier_scanner is not None:
+            enriched_count = 0
+            for c in candidates:
+                if enriched_count >= 4:
+                    break
+                c_mint = str(c.get("mint") or "").strip()
+                if not c_mint or c.get("metrics_known", True):
+                    continue
+                try:
+                    dossier = self.dossier_scanner.scan_token_live(c_mint)
+                    if dossier and dossier.metrics_known:
+                        c["metrics_known"] = True
+                        c["top10_concentration_pct"] = dossier.top10_float_pct
+                        c["dev_balance_pct"] = dossier.dev_balance_pct
+                        c["sniper_ratio_pct"] = dossier.sniper_pct
+                        c["bundler_pct"] = dossier.bundler_pct
+                        c["wash_trading_flag"] = dossier.wash_trading_flag
+                        c["clone_factory_flag"] = dossier.clone_factory_flag
+                        c["dev_factory_flag"] = dossier.dev_factory_flag
+                        c["avg_tx_m5_usd"] = dossier.avg_tx_m5_usd
+                        c["same_name_count"] = dossier.same_name_count
+                        c["why_price_moves"] = dossier.why_price_moves
+                        c["actionable_playbook"] = dossier.actionable_playbook
+                        c["holder_count"] = dossier.holder_count
+                        enriched_count += 1
+                except Exception as exc:
+                    logger.debug("No se pudo enriquecer candidato en vivo %s: %s", c_mint, exc)
 
         # Datos de DEMOSTRACIÓN: fallback solo si demo_mode está explícitamente activo (§3 Sin Mocks Silenciosos)
         if not candidates and self.demo_mode:
@@ -832,15 +1164,42 @@ class GMGNBridge:
             vol5m = float(t.get("volume_5m_usd", 0.0))
             spark = t.get("sparkline", [10, 11, 10.5, 12, 11.8, 13])
             metrics_known = bool(t.get("metrics_known", True))
+            bundler_pct = float(t.get("bundler_pct", sniper_pct if sniper_pct >= 25.0 else 0.0))
+            wash_flag = bool(t.get("wash_trading_flag", False))
+            clone_flag = bool(t.get("clone_factory_flag", False))
+            dev_factory_flag = bool(t.get("dev_factory_flag", False))
+            avg_tx_m5 = float(t.get("avg_tx_m5_usd", round(vol5m / 10.0, 2) if vol5m > 0 else 0.0))
+            same_name_cnt = int(t.get("same_name_count", 1))
 
-            # Evaluación Cuantitativa con Modelo de Machine Learning (HistGradientBoosting)
+            # Umbrales adaptativos con puerta BP-003 (N≥30): si ninguna regla está
+            # desbloqueada, el decisor usa sus literales de siempre (fail-closed).
+            effective_thresholds: Optional[Dict[str, float]] = None
+            thresholds_meta: Optional[Dict[str, Dict[str, Any]]] = None
+            if self.evolution_engine is not None and hasattr(
+                    self.evolution_engine, "get_effective_decider_thresholds"):
+                try:
+                    thresholds_meta = self.evolution_engine.get_effective_decider_thresholds()
+                    unlocked = {k: float(v["value"]) for k, v in thresholds_meta.items()
+                                if v.get("unlocked")}
+                    effective_thresholds = unlocked or None
+                except Exception as exc:
+                    logger.warning("Umbrales adaptativos ilegibles; se usan literales: %s", exc)
+                    effective_thresholds, thresholds_meta = None, None
+
+            # Evaluación Cuantitativa con Modelo de Machine Learning (HistGradientBoosting + Fail-Closed)
             ml_eval = self.quant_model.predict_token(
                 first_mc=float(t.get("first_market_cap", mc)),
                 first_liq=float(t.get("first_liquidity", liq)),
                 volume_24h=vol5m * 288.0,
-                holder_count=10,
+                holder_count=int(t.get("holder_count", 10)),
                 dev_balance_pct=dev_pct,
                 top10_pct=top10,
+                metrics_known=metrics_known,
+                bundler_pct=bundler_pct,
+                wash_trading_flag=wash_flag,
+                clone_factory_flag=clone_flag,
+                dev_factory_flag=dev_factory_flag,
+                thresholds=effective_thresholds,
             )
 
             pat = PatternDetection(
@@ -854,8 +1213,17 @@ class GMGNBridge:
 
             veto_reason = ml_eval["veto_reason"]
             score = ml_eval["confluence_score"]
-            admitted = ml_eval["admitted"]
-            verdict = ml_eval["verdict"]
+            admitted = bool(ml_eval["admitted"] and metrics_known)
+            verdict = ml_eval["verdict"] if metrics_known else "VETO"
+
+            # Si el token fue vetado y tiene MC real, registrarlo en el Shadow Veto Ledger ("¿hubiera ganado o perdido?")
+            if not admitted and self.evolution_engine is not None and mc > 0.0:
+                self.evolution_engine.register_vetoed_token(
+                    mint=mint,
+                    symbol=sym,
+                    veto_reason=str(veto_reason or "VETO"),
+                    entry_mc_usd=mc,
+                )
 
             tp_targets = {
                 "tp1_partial_50pct": round(mc * 1.50, 2),
@@ -864,14 +1232,58 @@ class GMGNBridge:
             }
             sl_target = round(mc * (1.0 - 0.3349), 2)
 
-            # Auto-Sniper Bot en acción: si está habilitado, score >= 85 y el
-            # feed puede PRECIAR el mint (dato real), auto-abre. Sin precio real
-            # no se abre: evita posiciones zombi imposibles de seguir.
-            if (self.paper_trader.auto_bot_enabled and admitted and score >= 85.0
+            why_moves = str(t.get("why_price_moves") or ml_eval["causal_trigger"])
+            playbook = str(
+                t.get("actionable_playbook")
+                or (
+                    f"TP1 +50% (${tp_targets['tp1_partial_50pct']:,.0f}), BE +25%, SL real -33.49%"
+                    if admitted
+                    else f"VETO: {veto_reason or 'sin confluencia verificada'}"
+                )
+            )
+
+            # Auto-Sniper Bot en acción: exige metrics_known=True, admitted=True, score >= 85
+            executed = False
+            if (self.paper_trader.auto_bot_enabled and metrics_known and admitted and score >= 85.0
                     and mint not in self.paper_trader.open_positions
                     and self.feed is not None
                     and self.feed.market_cap_usd(mint) is not None):
                 self.paper_trader.open_trade(mint, sym, mc, size_sol=1.5)
+                executed = True
+
+            # P1 — persiste la traza E0→E6 de esta decisión (pensamiento filtrado en vivo).
+            if self.store is not None and hasattr(self.store, "append_decision_trace"):
+                if executed:
+                    exec_verdict, exec_reason = "pass", "OPENED_PAPER_TRADE"
+                elif not metrics_known:
+                    exec_verdict, exec_reason = "skip", "METRICAS_SIN_VERIFICAR"
+                elif not admitted:
+                    exec_verdict, exec_reason = "skip", f"NO_ADMISION: {veto_reason or 'EV neto <= 0'}"
+                elif not self.paper_trader.auto_bot_enabled:
+                    exec_verdict, exec_reason = "fail", "AUTO_BOT_DISABLED"
+                elif score < 85.0:
+                    exec_verdict, exec_reason = "fail", f"SCORE_BELOW_THRESHOLD: confluencia {score:.1f} < 85.0"
+                elif mint in self.paper_trader.open_positions:
+                    exec_verdict, exec_reason = "fail", "ALREADY_OPEN: posición ya abierta"
+                else:
+                    exec_verdict, exec_reason = "fail", "NO_LIVE_PRICE: feed sin market cap real"
+                try:
+                    stages = build_decision_stages(
+                        source=str(source or ""), mint=mint, symbol=sym, mc_usd=mc, liq_usd=liq,
+                        metrics_known=metrics_known, bundler_pct=bundler_pct,
+                        wash_trading_flag=wash_flag, clone_factory_flag=clone_flag,
+                        dev_factory_flag=dev_factory_flag, dev_balance_pct=dev_pct,
+                        top10_pct=top10, ml_eval=ml_eval,
+                        thresholds_meta=thresholds_meta)
+                    stages.append({
+                        "stage": "E6_execution", "value": round(score, 1), "threshold": 85.0,
+                        "operator": ">=", "verdict": exec_verdict, "reason": exec_reason,
+                        "source": "auto_sniper", "source_kind": "default_literal"})
+                    self.store.append_decision_trace(
+                        trace_id=f"{int(time.time() * 1000):x}-{str(mint)[:6]}",
+                        mint=mint, symbol=sym, ts=time.time(), stages=stages)
+                except Exception as exc:
+                    logger.warning("No se pudo persistir traza de decisión (%s): %s", mint, exc)
 
             recommendations.append(
                 TokenBuyRecommendation(
@@ -897,6 +1309,14 @@ class GMGNBridge:
                     tp_targets=tp_targets,
                     sl_target=sl_target,
                     metrics_known=metrics_known,
+                    bundler_pct=bundler_pct,
+                    wash_trading_flag=wash_flag,
+                    clone_factory_flag=clone_flag,
+                    dev_factory_flag=dev_factory_flag,
+                    avg_tx_m5_usd=avg_tx_m5,
+                    same_name_count=same_name_cnt,
+                    why_price_moves=why_moves,
+                    actionable_playbook=playbook,
                 )
             )
 
@@ -906,7 +1326,7 @@ class GMGNBridge:
         return recommendations
 
     # =========================================================================
-    # 3. AUDITORÍA FORENSE INDIVIDUAL DE TOKEN
+    # 3. AUDITORÍA FORENSE INDIVIDUAL DE TOKEN (Multi-Fuente + GMGN Dossier)
     # =========================================================================
 
     def audit_token(self, address: str, chain: str = "sol") -> Dict[str, Any]:
@@ -916,14 +1336,51 @@ class GMGNBridge:
             if raw_sec:
                 sec_data = raw_sec
 
-        rug_ratio = float(sec_data.get("rug_ratio", 0.15))
-        top10 = float(sec_data.get("top10_holder_pct", 22.0))
-        dev_holding = float(sec_data.get("dev_token_burn_pct", 0.5))
-        sniper_pct = float(sec_data.get("sniper_pct", 10.0))
+        # Escaneo multi-fuente en vivo (GoPlus / RugCheck / DexScreener) si no hay datos CLI
+        dossier_dict: Optional[Dict[str, Any]] = None
+        if not sec_data and address and len(address.strip()) >= 16:
+            try:
+                dossier = self.dossier_scanner.scan_token_live(address, chain=chain)
+                if dossier and dossier.metrics_known:
+                    dossier_dict = dossier.to_dict()
+            except Exception as exc:
+                logger.debug("Fallback en audit_token scan_token_live: %s", exc)
 
-        pat = self.classify_pattern(1, rug_ratio, top10, dev_holding, sniper_pct, 15000.0, 4500.0)
-        is_safe = (rug_ratio <= 0.30 and top10 <= 30.0 and dev_holding <= 1.50 and sniper_pct <= 25.0)
+        if dossier_dict:
+            rug_ratio = round(max(0.0, (100.0 - float(dossier_dict["composite_dd_score"])) / 100.0), 2)
+            top10 = float(dossier_dict["top10_float_pct"])
+            dev_holding = float(dossier_dict["dev_balance_pct"])
+            sniper_pct = float(dossier_dict["bundler_pct"] or dossier_dict["sniper_pct"])
+            mc = float(dossier_dict["market_cap_usd"] or 15000.0)
+            liq = float(dossier_dict["liquidity_usd"] or 4500.0)
+        else:
+            rug_ratio = float(sec_data.get("rug_ratio", 0.15))
+            top10 = float(sec_data.get("top10_holder_pct", 22.0))
+            dev_holding = float(sec_data.get("dev_token_burn_pct", 0.5))
+            sniper_pct = float(sec_data.get("sniper_pct", 10.0))
+            mc, liq = 15000.0, 4500.0
+
+        pat = self.classify_pattern(1, rug_ratio, top10, dev_holding, sniper_pct, mc, liq)
+        is_safe = (
+            rug_ratio <= 0.30
+            and top10 <= 30.0
+            and dev_holding <= 1.50
+            and sniper_pct <= 25.0
+            and (dossier_dict is None or bool(dossier_dict.get("admitted")))
+        )
         verdict = "PASS" if is_safe else "FAIL"
+
+        veto_flags = [
+            f for f in [
+                "RUG_RATIO_CRITICAL" if rug_ratio > 0.30 else None,
+                "CABAL_CLUSTER_DOMINANCE" if top10 > 30.0 else None,
+                "DEV_INVENTORY_EXCESS" if dev_holding > 1.50 else None,
+                "SNIPER_OVERHANG" if sniper_pct > 25.0 else None,
+                "BUNDLER_UNIFORM_TRAP" if (dossier_dict and dossier_dict.get("bundler_flag")) else None,
+                "WASH_TRADING_STAIRCASE" if (dossier_dict and dossier_dict.get("wash_trading_flag")) else None,
+                "CLONE_FACTORY_VAMP" if (dossier_dict and dossier_dict.get("clone_factory_flag")) else None,
+            ] if f is not None
+        ]
 
         return {
             "address": address,
@@ -935,12 +1392,7 @@ class GMGNBridge:
             "dev_holding_pct": dev_holding,
             "sniper_pct": sniper_pct,
             "pattern": asdict(pat),
-            "veto_flags": [
-                f for f in [
-                    "RUG_RATIO_CRITICAL" if rug_ratio > 0.30 else None,
-                    "CABAL_CLUSTER_DOMINANCE" if top10 > 30.0 else None,
-                    "DEV_INVENTORY_EXCESS" if dev_holding > 1.50 else None,
-                    "SNIPER_OVERHANG" if sniper_pct > 25.0 else None,
-                ] if f is not None
-            ],
+            "veto_flags": veto_flags,
+            "dossier": dossier_dict,
         }
+

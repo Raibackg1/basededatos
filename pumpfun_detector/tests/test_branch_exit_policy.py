@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from detector.live_store import LiveStore
 from detector.paper_broker import PaperBroker
 from detector.costs import CostModel
+from detector.metrics_registry import claimed_wr, claimed_pf
 
 
 class _FakeDecision:
@@ -22,8 +23,8 @@ class _FakeDecision:
         self.admitted = admitted
         self.branch = branch
         self.confidence = confidence
-        self.expected_winrate = 0.5
-        self.expected_profit_factor = 1.0
+        self.expected_winrate = claimed_wr("test_fake_wr")
+        self.expected_profit_factor = claimed_pf("test_fake_pf")
         self.veto_reason = None
 
 

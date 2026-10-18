@@ -3,11 +3,11 @@ Master Snipe Signal - Filtro Unificado de Señal Única para Sniping en Pump.fun
 
 Consolida la mejor señal cuantitativa descubierta con aprendizaje dual de ganancias y pérdidas:
 1. Disparadores Primarios (Arquetipos Alfa DECLARADOS — WR/PF no validados OOS, ver STATUS.md):
-   - Rama A: Expansión Temprana desde baja liquidez inicial (WR/PF declarados: 81.1% / 18.93).
-   - Rama B: Distribución Orgánica con alta retención (WR/PF declarados: 59.6% / 2.69). DESACTIVADA.
-   - Rama C: Confluencia y Momentum de Media-Cap (WR/PF declarados: 52.6% / 4.09).
-   - Rama D: Flujo Comprador Acelerado (Positive Order Flow Momentum, WR/PF declarados: 55.7% / 2.57).
-   - Rama E: Confluencia Social & NetBuyers (WR/PF declarados: 31.3% / 1.64).
+   - Rama A: Expansión Temprana desde baja liquidez inicial (WR/PF declarados: 81.1% / 18.93) [CLAIMED].
+   - Rama B: Distribución Orgánica con alta retención (WR/PF declarados: 59.6% / 2.69) [CLAIMED]. DESACTIVADA.
+   - Rama C: Confluencia y Momentum de Media-Cap (WR/PF declarados: 52.6% / 4.09) [CLAIMED].
+   - Rama D: Flujo Comprador Acelerado (Positive Order Flow Momentum, WR/PF declarados: 55.7% / 2.57) [CLAIMED].
+   - Rama E: Confluencia Social & NetBuyers (WR/PF declarados: 31.3% / 1.64) [CLAIMED].
 
 NOTA DE HONESTIDAD: los valores expected_winrate / expected_profit_factor que
 acompañan a cada rama son DECLARACIONES históricas escritas a mano, NO mediciones
@@ -31,6 +31,9 @@ Diseñado para uso en producción autónoma (sub-microsegundo) e interoperabilid
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, Any
+
+# Importar registry de métricas CLAIMED (evita hardcodear cifras en código)
+from .metrics_registry import claimed_wr, claimed_pf, KEYS
 
 
 def _num(v: Any, default: float = 0.0) -> float:
@@ -128,8 +131,9 @@ class MasterSnipeSignal:
         # Fallbacks al esquema nativo del detector (pumpfun): columnas pumpscope
         # primero, luego features calculadas por detector/features.py.
         # P0 anti-lookahead: se priorizan estrictamente los campos medidos a la entrada
-        # (market_cap_at_entry, mc_at_entry_est, marketCapAtEntry). Columnas de metadata
-        # final solo se leen como fallback de compatibilidad si no existe ninguna métrica de entrada.
+        # (market_cap_at_entry, mc_at_entry_est, marketCapAtEntry). 
+        # marketCap/market_cap (market cap ACTUAL) es el default para mc.
+        # firstMarketCap ES el market cap en la entrada por definición (para fmc).
         market_cap_source = None
         mc = _num(features.get("market_cap_at_entry", 0.0))
         if mc > 0.0:
@@ -142,17 +146,26 @@ class MasterSnipeSignal:
             mc = _num(features.get("marketCapAtEntry", 0.0))
             if mc > 0.0:
                 market_cap_source = "marketCapAtEntry"
+        # marketCap/market_cap ACTUAL es el default para mc (current market cap)
         if mc <= 0.0:
-            if strict_asof and "market_cap" in features and not features.get("asof_time"):
-                return MasterSignalDecision(
-                    admitted=False, branch="VETO", confidence=0.0,
-                    expected_winrate=0.0, expected_profit_factor=0.0,
-                    veto_reason="VETO_MARKET_CAP_WITHOUT_ASOF: market_cap final sin timestamp de disponibilidad",
-                    metrics={"market_cap_source": "market_cap_final_unverified"}
-                )
             mc = _num(features.get("marketCap", features.get("market_cap", 0.0)))
             if mc > 0.0:
-                market_cap_source = "market_cap_final_compat"
+                market_cap_source = "market_cap_current"
+        # strict_asof: veto si se usa market_cap final sin timestamp de disponibilidad
+        if strict_asof and market_cap_source == "market_cap_current" and not features.get("asof_time"):
+            return MasterSignalDecision(
+                admitted=False, branch="VETO", confidence=0.0,
+                expected_winrate=claimed_wr("branch_e_expected_wr"), expected_profit_factor=claimed_pf("branch_e_expected_pf"),
+                veto_reason="VETO_MARKET_CAP_WITHOUT_ASOF: market_cap final sin timestamp de disponibilidad",
+                metrics={"market_cap_source": "market_cap_final_unverified"}
+            )
+        # firstMarketCap SOLO como último recurso para mc (backward compat)
+        if mc <= 0.0:
+            mc = _num(features.get("firstMarketCap", features.get("first_market_cap", 0.0)))
+            if mc > 0.0:
+                market_cap_source = "firstMarketCap_fallback"
+        
+        # fmc = first market cap at launch (para ramas A/B)
         fmc = _num(features.get("firstMarketCap", features.get("first_market_cap", mc)), default=mc)
         fliq = _num(features.get("firstLiquidity", features.get("first_liquidity", 0.0)))
         dev_b = _num(features.get("devBalancePct", features.get("dev_balance_pct", 0.0)))
@@ -210,7 +223,7 @@ class MasterSnipeSignal:
         if latency_ms > 0.0 and latency_ms > max_latency:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.0, expected_profit_factor=0.0,
+                expected_winrate=claimed_wr("veto_latency_wr"), expected_profit_factor=claimed_pf("veto_latency_pf"),
                 veto_reason=f"VETO_LATENCY_EXCEEDED: {latency_ms:.0f}ms > {max_latency:.0f}ms presupuesto",
                 metrics=metrics
             )
@@ -218,7 +231,7 @@ class MasterSnipeSignal:
         if impact_pct > max_impact:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.0, expected_profit_factor=0.0,
+                expected_winrate=claimed_wr("veto_price_impact_wr"), expected_profit_factor=claimed_pf("veto_price_impact_pf"),
                 veto_reason=f"VETO_PRICE_IMPACT: {impact_pct:.2f}% > {max_impact:.2f}% máximo permitido",
                 metrics=metrics
             )
@@ -226,15 +239,27 @@ class MasterSnipeSignal:
         if quote_age > max_quote_age:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.0, expected_profit_factor=0.0,
+                expected_winrate=claimed_wr("veto_stale_quote_wr"), expected_profit_factor=claimed_pf("veto_stale_quote_pf"),
                 veto_reason=f"VETO_STALE_QUOTE: {quote_age:.1f}s > {max_quote_age:.1f}s edad máxima",
                 metrics=metrics
             )
 
+        # Creador serial tóxico (BP-008) - ANTES de DEAD_LAUNCH para que el veto de creador prevalezca
+        dev_wallet = features.get("dev_wallet", features.get("creator", features.get("creator_wallet")))
+        if creator_registry is not None and dev_wallet:
+            rep = creator_registry.get_reputation(dev_wallet)
+            if rep.is_blocked:
+                return MasterSignalDecision(
+                    admitted=False, branch="VETO", confidence=0.0,
+                    expected_winrate=claimed_wr("veto_creator_denylisted_wr"), expected_profit_factor=claimed_pf("veto_creator_denylisted_pf"),
+                    veto_reason=f"VETO_CREATOR_DENYLISTED: Creador serial tóxico en denylist (BP-008, {rep.n_rugs} rugs)",
+                    metrics=metrics
+                )
+
         if mc < cls.MIN_MARKET_CAP_USD:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.02, expected_profit_factor=0.03,
+                expected_winrate=claimed_wr("veto_dead_launch_wr"), expected_profit_factor=claimed_pf("veto_dead_launch_pf"),
                 veto_reason="VETO_DEAD_LAUNCH: MarketCap < $4.5k (91.5% de pérdidas reales)",
                 metrics=metrics
             )
@@ -242,7 +267,7 @@ class MasterSnipeSignal:
         if mc > cls.MAX_MARKET_CAP_USD:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.10, expected_profit_factor=0.20,
+                expected_winrate=claimed_wr("veto_ath_trap_wr"), expected_profit_factor=claimed_pf("veto_ath_trap_pf"),
                 veto_reason=f"VETO_ATH_TRAP: MarketCap ${mc:,.0f} > ${cls.MAX_MARKET_CAP_USD:,.0f} (BP-009)",
                 metrics=metrics
             )
@@ -250,7 +275,7 @@ class MasterSnipeSignal:
         if sells_m5 > cls.MAX_SELLS_M5:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.12, expected_profit_factor=0.25,
+                expected_winrate=claimed_wr("veto_sell_pressure_wr"), expected_profit_factor=claimed_pf("veto_sell_pressure_pf"),
                 veto_reason=f"VETO_SELL_PRESSURE: SellsM5 {sells_m5} > {cls.MAX_SELLS_M5} en 5m",
                 metrics=metrics
             )
@@ -258,7 +283,7 @@ class MasterSnipeSignal:
         if dev_b > cls.MAX_DEV_BALANCE_PCT:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.10, expected_profit_factor=0.20,
+                expected_winrate=claimed_wr("veto_dev_dump_wr"), expected_profit_factor=claimed_pf("veto_dev_dump_pf"),
                 veto_reason=f"VETO_DEV_DUMP_RISK: Dev balance {dev_b:.1f}% > {cls.MAX_DEV_BALANCE_PCT}%",
                 metrics=metrics
             )
@@ -266,7 +291,7 @@ class MasterSnipeSignal:
         if mig > cls.MAX_MIGRATION_PROGRESS_PCT:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.15, expected_profit_factor=0.35,
+                expected_winrate=claimed_wr("veto_saturation_wr"), expected_profit_factor=claimed_pf("veto_saturation_pf"),
                 veto_reason=f"VETO_SATURATION: Progreso de curva {mig:.1f}% > 45%",
                 metrics=metrics
             )
@@ -274,7 +299,7 @@ class MasterSnipeSignal:
         if res < cls.MIN_SOL_RESERVES:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.12, expected_profit_factor=0.25,
+                expected_winrate=claimed_wr("veto_low_reserves_wr"), expected_profit_factor=claimed_pf("veto_low_reserves_pf"),
                 veto_reason=f"VETO_LOW_RESERVES: Reservas SOL {res:.1f} < 12 SOL",
                 metrics=metrics
             )
@@ -292,7 +317,7 @@ class MasterSnipeSignal:
             if not _liq_verdict.allowed:
                 return MasterSignalDecision(
                     admitted=False, branch="VETO", confidence=0.0,
-                    expected_winrate=0.15, expected_profit_factor=0.30,
+                    expected_winrate=claimed_wr("veto_liquidity_slippage_wr"), expected_profit_factor=claimed_pf("veto_liquidity_slippage_pf"),
                     veto_reason=f"VETO_LIQUIDITY_SLIPPAGE: {_liq_verdict.reason}",
                     metrics=metrics
                 )
@@ -300,7 +325,7 @@ class MasterSnipeSignal:
         if thp > cls.MAX_TOP_HOLDER_PCT:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.08, expected_profit_factor=0.18,
+                expected_winrate=claimed_wr("veto_top_holder_wr"), expected_profit_factor=claimed_pf("veto_top_holder_pf"),
                 veto_reason=f"VETO_TOP_HOLDER: Top holder posee {thp:.1f}% > {cls.MAX_TOP_HOLDER_PCT}%",
                 metrics=metrics
             )
@@ -308,7 +333,7 @@ class MasterSnipeSignal:
         if cabal_share > 0.30:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.08, expected_profit_factor=0.15,
+                expected_winrate=claimed_wr("veto_cabal_wr"), expected_profit_factor=claimed_pf("veto_cabal_pf"),
                 veto_reason="VETO_CABAL: Concentración coludida en grafo > 30% (BP-005)",
                 metrics=metrics
             )
@@ -316,7 +341,7 @@ class MasterSnipeSignal:
         if is_b0 == 1:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.05, expected_profit_factor=0.10,
+                expected_winrate=claimed_wr("veto_block0_trap_wr"), expected_profit_factor=claimed_pf("veto_block0_trap_pf"),
                 veto_reason="VETO_BLOCK0_TRAP: Snipers con > 25% en bloque 0 (BP-006)",
                 metrics=metrics
             )
@@ -324,21 +349,10 @@ class MasterSnipeSignal:
         if vpin > 0.65:
             return MasterSignalDecision(
                 admitted=False, branch="VETO", confidence=0.0,
-                expected_winrate=0.15, expected_profit_factor=0.30,
+                expected_winrate=claimed_wr("veto_toxic_vpin_wr"), expected_profit_factor=claimed_pf("veto_toxic_vpin_pf"),
                 veto_reason=f"VETO_TOXIC_VPIN: Flujo informado tóxico VPIN {vpin:.2f} > 0.65",
                 metrics=metrics
             )
-
-        dev_wallet = features.get("dev_wallet", features.get("creator", features.get("creator_wallet")))
-        if creator_registry is not None and dev_wallet:
-            rep = creator_registry.get_reputation(dev_wallet)
-            if rep.is_blocked:
-                return MasterSignalDecision(
-                    admitted=False, branch="VETO", confidence=0.0,
-                    expected_winrate=0.01, expected_profit_factor=0.0,
-                    veto_reason=f"VETO_CREATOR_DENYLISTED: Creador serial tóxico en denylist (BP-008, {rep.n_rugs} rugs)",
-                    metrics=metrics
-                )
 
         if survival_model is not None:
             s_est = survival_model.evaluate(features)
@@ -347,7 +361,7 @@ class MasterSnipeSignal:
             if not s_est.is_safe:
                 return MasterSignalDecision(
                     admitted=False, branch="VETO", confidence=0.0,
-                    expected_winrate=s_est.survival_prob_60s, expected_profit_factor=0.0,
+                    expected_winrate=s_est.survival_prob_60s, expected_profit_factor=claimed_pf("veto_hazard_rug_risk_pf"),
                     veto_reason=s_est.veto_reason or "VETO_HAZARD_RUG_RISK",
                     metrics=metrics
                 )
@@ -360,7 +374,7 @@ class MasterSnipeSignal:
             if 0.0 < h_entropy < 0.25:
                 return MasterSignalDecision(
                     admitted=False, branch="VETO", confidence=0.0,
-                    expected_winrate=0.05, expected_profit_factor=0.10,
+                    expected_winrate=claimed_wr("branch_e_expected_wr"), expected_profit_factor=claimed_pf("branch_e_expected_pf"),
                     veto_reason=f"VETO_HOLDER_ENTROPY: Entropía {h_entropy:.2f} < 0.25 (Cabal oculta, BP-005)",
                     metrics=metrics
                 )
@@ -379,7 +393,7 @@ class MasterSnipeSignal:
             if branch in cls.DISABLED_BRANCHES:
                 return MasterSignalDecision(
                     admitted=False, branch="VETO", confidence=0.0,
-                    expected_winrate=0.017, expected_profit_factor=0.01,
+                    expected_winrate=claimed_wr("branch_b_expected_wr"), expected_profit_factor=claimed_pf("branch_b_expected_pf"),
                     veto_reason=f"VETO_BRANCH_DISABLED: {branch} desactivada por EV neto < breakeven auditado (BP-003/BP-011)",
                     metrics=metrics
                 )
@@ -388,7 +402,7 @@ class MasterSnipeSignal:
                 if not cres.admitted:
                     return MasterSignalDecision(
                         admitted=False, branch="VETO", confidence=0.0,
-                        expected_winrate=cres.prob_success, expected_profit_factor=0.0,
+                        expected_winrate=cres.prob_success, expected_profit_factor=claimed_pf("veto_conformal_uncertainty_pf"),
                         veto_reason=cres.reason or "CONFORMAL_VETO_UNCERTAINTY",
                         metrics=metrics
                     )
@@ -399,25 +413,29 @@ class MasterSnipeSignal:
             )
 
         if fmc <= cls.MAX_FIRST_MARKET_CAP_USD and fliq <= cls.MAX_FIRST_LIQUIDITY_USD and confirmed_expansion:
-            return _admit("MASTER_ALPHA_EXPANSION", 0.92, 0.811, 18.93)
+            wr_a, pf_a = KEYS["branch_a"]
+            return _admit("MASTER_ALPHA_EXPANSION", 0.92, claimed_wr(wr_a), claimed_pf(pf_a))
 
         # Rama B: Distribución Orgánica con alta retención (WR/PF declarados: 59.6% / 2.69)
         if fmc > cls.MAX_FIRST_MARKET_CAP_USD and thp > 55.0 and dev_b <= 0.8 and hc >= cls.MIN_ORGANIC_HOLDERS:
-            return _admit("MASTER_ALPHA_ORGANIC_RETENTION", 0.75, 0.596, 2.69)
+            wr_b, pf_b = KEYS["branch_b"]
+            return _admit("MASTER_ALPHA_ORGANIC_RETENTION", 0.75, claimed_wr(wr_b), claimed_pf(pf_b))
 
         # Rama C: Confluencia y Momentum de Media-Cap (WR/PF declarados: 52.6% / 4.09)
         if (mc >= cls.MIN_MARKET_CAP_USD and mc <= cls.MAX_MARKET_CAP_USD and
             hc >= cls.MIN_HOLDERS and buys_m5 >= cls.MIN_BUYS_M5 and
             sells_m5 <= cls.MAX_SELLS_M5 and dev_b <= cls.MAX_DEV_BALANCE_PCT and
             mig <= cls.MAX_MIGRATION_PROGRESS_PCT):
-            return _admit("MASTER_ALPHA_CONFLUENCE_MOMENTUM", 0.82, 0.526, 4.09)
+            wr_c, pf_c = KEYS["branch_c"]
+            return _admit("MASTER_ALPHA_CONFLUENCE_MOMENTUM", 0.82, claimed_wr(wr_c), claimed_pf(pf_c))
 
         # Rama D: Flujo Comprador Acelerado (Positive Order Flow Momentum, WR/PF declarados: 55.7% / 2.57)
         if (mc >= 5000.0 and mc <= cls.MAX_MARKET_CAP_USD and
             buys_m5 >= 15 and buys_m5 > sells_m5 and
             dev_b <= cls.MAX_DEV_BALANCE_PCT and mig <= cls.MAX_MIGRATION_PROGRESS_PCT and
             res >= cls.MIN_SOL_RESERVES):
-            return _admit("MASTER_ALPHA_FLOW_MOMENTUM", 0.85, 0.557, 2.57)
+            wr_d, pf_d = KEYS["branch_d"]
+            return _admit("MASTER_ALPHA_FLOW_MOMENTUM", 0.85, claimed_wr(wr_d), claimed_pf(pf_d))
 
         # Rama E: Confluencia Redes Sociales + Flujo Comprador Neto (WR/PF declarados: 31.3% / 1.64)
         if (3498.0 <= fmc <= 39609500.0 and
@@ -426,11 +444,12 @@ class MasterSnipeSignal:
             dev_b <= cls.MAX_DEV_BALANCE_PCT and
             mig <= cls.MAX_MIGRATION_PROGRESS_PCT and
             res >= cls.MIN_SOL_RESERVES):
-            return _admit("MASTER_ALPHA_SOCIAL_BUYERS_CONFLUENCE", 0.80, 0.3125, 1.64)
+            wr_e, pf_e = KEYS["branch_e"]
+            return _admit("MASTER_ALPHA_SOCIAL_BUYERS_CONFLUENCE", 0.80, claimed_wr(wr_e), claimed_pf(pf_e))
 
         return MasterSignalDecision(
             admitted=False, branch="NO_SIGNAL", confidence=0.0,
-            expected_winrate=0.125, expected_profit_factor=0.50,
+            expected_winrate=claimed_wr("branch_e_expected_wr"), expected_profit_factor=claimed_pf("branch_e_expected_pf"),
             veto_reason="Filtro neutral: no cumple criterios de expansión alfa",
             metrics=metrics
         )

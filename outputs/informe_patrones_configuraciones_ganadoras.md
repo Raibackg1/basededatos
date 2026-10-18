@@ -1,7 +1,16 @@
+# ⚠️ SUPERSEDED — SUPERADO POR ANÁLISIS POSTERIOR + RUTA ABSOLUTA
+
+> **Este informe ha sido SUPERADO** por el barrido causal (`scripts/causal_sweep.py`).
+> **Violación G3:** Usa ruta absoluta `$PUMPSCOPE_DB` (línea 4).
+> La verdad medida: **12.55% WR / PF 0.269 / −79,771 USD** (5,021 trades, `custom.db`).
+> Mantener solo para historial. Ver `outputs/INDEX.md` y `STATUS.md`.
+
+---
+
 # Informe Forense y Cuantitativo: Benchmark de Repositorios Open-Source en Datos Reales
 
 > **Fecha de Ejecución:** 2026-10-15 06:42:32 UTC  
-> **Base de Datos On-Chain:** `D:\hjh\pumpscope\db\custom.db` (Datos 100% Reales, Sin Mocks)  
+> **Base de Datos On-Chain:** `$PUMPSCOPE_DB` (Datos 100% Reales, Sin Mocks)  
 > **Tokens Reales Evaluados:** 3,500  
 > **Tiempo de Cómputo:** 1.81 segundos  
 > **Modelo de Costos Reales:** Stop Loss a `-33.49%` (BP-001) | Fee Drag `6.0%` (0.008 SOL)  

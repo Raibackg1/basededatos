@@ -22,7 +22,7 @@ if sys.platform == "win32":
 from cockpit.server import CockpitState, make_server
 
 def test_cockpit_e2e():
-    db_path = "D:\\hjh\\pumpscope\\db\\custom.db"
+    db_path = os.environ.get("PUMPSCOPE_DB")
     if not os.path.exists(db_path):
         db_path = os.path.join(os.path.dirname(__file__), "..", "demo_pumpfun.db")
 
@@ -42,7 +42,7 @@ def test_cockpit_e2e():
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                executable_path=os.environ.get("CHROME_PATH", ""),
                 headless=True,
             )
             page = browser.new_page()

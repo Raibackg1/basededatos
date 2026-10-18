@@ -17,6 +17,7 @@ sys.path.insert(0, ROOT)
 
 from detector.live_store import LiveStore
 from detector.master_signal import MasterSnipeSignal
+from detector.metrics_registry import claimed_wr, claimed_pf
 from detector.recalibrator import ThresholdRecalibrator, RecalibrationComparator
 
 
@@ -24,7 +25,7 @@ def _dec(admitted=True, branch="TEST"):
     """Decisión ligera con el contrato que consume LiveStore.record_decision."""
     return types.SimpleNamespace(
         admitted=admitted, branch=branch, confidence=0.9,
-        expected_winrate=0.6, expected_profit_factor=1.5, veto_reason=None,
+        expected_winrate=claimed_wr("test_recalib_wr"), expected_profit_factor=claimed_pf("test_recalib_pf"), veto_reason=None,
     )
 
 

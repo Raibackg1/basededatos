@@ -17,7 +17,7 @@ resultado válido.
 
 Uso
 ---
-    python -m scripts.causal_sweep --db "D:\\hjh\\pumpscope\\db\\custom.db" \
+    python -m scripts.causal_sweep --db "$PUMPSCOPE_DB" \
         --mapping mapping_pumpscope.json --out scratch\\sweep
 """
 from __future__ import annotations
@@ -212,7 +212,7 @@ def select_promoted(candidates: List[Dict[str, Any]], min_oos_n: int,
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Barrido causal de umbrales (OOS honesto).")
-    ap.add_argument("--db", default=r"D:\hjh\pumpscope\db\custom.db")
+    ap.add_argument("--db", default=os.environ.get("PUMPSCOPE_DB", "custom.db"))
     ap.add_argument("--mapping", default="mapping_pumpscope.json")
     ap.add_argument("--out", default="scratch/sweep")
     ap.add_argument("--min-oos-n", type=int, default=30)

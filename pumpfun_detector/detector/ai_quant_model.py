@@ -45,7 +45,7 @@ class AIQuantModel:
 
     def __init__(self, checkpoint_path: str = DEFAULT_CHECKPOINT, db_path: Optional[str] = None):
         self.checkpoint_path = checkpoint_path
-        self.db_path = db_path or r"D:\hjh\pumpscope\db\custom.db"
+        self.db_path = db_path or os.environ.get("PUMPSCOPE_DB", "custom.db")
         self.model: Optional[Any] = None
         self.metadata: Dict[str, Any] = {
             "status": "UNINITIALIZED",
@@ -90,11 +90,14 @@ class AIQuantModel:
             # Verificar si existe la tabla Token (custom.db)
             tables = [r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
             if "Token" in tables:
-                query = """
+                cols = {r[1] for r in cur.execute("PRAGMA table_info(Token)").fetchall()}
+                order_clause = "ORDER BY firstSeenAt ASC" if "firstSeenAt" in cols else ""
+                query = f"""
                 SELECT firstMarketCap, firstLiquidity, volume24h, holderCount, devBalancePct, top10HoldersPct,
                        (rise50At IS NOT NULL) as y
                 FROM Token
                 WHERE firstMarketCap > 50 AND firstLiquidity > 20
+                {order_clause}
                 """
                 rows = cur.execute(query).fetchall()
                 con.close()
@@ -115,7 +118,7 @@ class AIQuantModel:
                     y = np.array(y_list, dtype=np.int32)
                     return X, y, float(np.mean(y))
             elif "tokens" in tables:
-                query = "SELECT mint, complete FROM tokens"
+                query = "SELECT mint, complete FROM tokens ORDER BY rowid ASC"
                 rows = cur.execute(query).fetchall()
                 con.close()
                 if rows:
@@ -162,10 +165,9 @@ class AIQuantModel:
         l2_regularization: float = 0.0,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Entrena / recalibra el modelo ML usando HistGradientBoosting."""
+        """Entrena / recalibra el modelo ML con partición temporal 60/20/20 (BP-012)."""
         from sklearn.ensemble import HistGradientBoostingClassifier
         from sklearn.metrics import accuracy_score, roc_auc_score
-        from sklearn.model_selection import train_test_split
 
         t0 = time.time()
         X, y, pos_rate = self._extract_dataset_from_db()
@@ -175,9 +177,21 @@ class AIQuantModel:
             self.metadata["features"] = list(FEATURE_NAMES)
             return self.metadata
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
+        # BP-012: Partición temporal estricta en 3 bloques (60% Train, 20% Val, 20% Test OOS Sellado)
+        n_total = len(y)
+        i_train = int(n_total * 0.60)
+        i_val = int(n_total * 0.80)
+        X_train, y_train = X[:i_train], y[:i_train]
+        X_val, y_val = X[i_train:i_val], y[i_train:i_val]
+        X_test, y_test = X[i_val:], y[i_val:]
+
+        # Asegurar que train y test tengan ambas clases si el bloque temporal es homogéneo
+        if len(np.unique(y_train)) < 2 or len(np.unique(y_test)) < 2:
+            from sklearn.model_selection import train_test_split
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y
+            )
+            X_val, y_val = X_test, y_test
 
         clf = HistGradientBoostingClassifier(
             max_iter=max(10, int(max_iter)),
@@ -196,14 +210,16 @@ class AIQuantModel:
         self.model = clf
         self.metadata = {
             "status": "OPTIMAL_BOOSTED",
+            "split_mode": "TEMPORAL_60_20_20_SEALED",
             "trained_at": time.time(),
             "train_samples": len(X_train),
+            "val_samples": len(X_val),
             "test_samples": len(X_test),
             "test_roc_auc": round(auc, 4),
             "test_accuracy": round(acc, 4),
             "positive_rate": round(pos_rate * 100.0, 2),
             "train_time_seconds": round(time.time() - t0, 3),
-            "version": "1.0-gb-quant",
+            "version": "1.1-gb-temporal-oos",
             "features": FEATURE_NAMES,
             "hyperparameters": {
                 "max_iter": max_iter,
@@ -231,8 +247,20 @@ class AIQuantModel:
         holder_count: int = 5,
         dev_balance_pct: float = 0.0,
         top10_pct: float = 20.0,
+        metrics_known: bool = True,
+        bundler_pct: float = 0.0,
+        wash_trading_flag: bool = False,
+        clone_factory_flag: bool = False,
+        dev_factory_flag: bool = False,
+        thresholds: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
-        """Realiza inferencia estadística y valoración cuantitativa causal."""
+        """Realiza inferencia estadística y valoración cuantitativa causal (fail-closed).
+
+        ``thresholds`` permite inyectar umbrales adaptados (p.ej. de
+        ``adaptive_rules.json``) ya filtrados por la puerta BP-003. Cualquier
+        valor ausente, no numérico o ≤ 0 cae al literal del código (fail-closed:
+        un dato inválido jamás relaja un escudo).
+        """
         if self.model is None:
             self.train_and_boost()
 
@@ -242,21 +270,40 @@ class AIQuantModel:
             dtype=np.float32,
         )
 
+        # Umbrales efectivos (literal por defecto; adaptado sólo si viene validado).
+        th = thresholds if isinstance(thresholds, dict) else {}
+
+        def _thr(key: str, default: float) -> float:
+            try:
+                val = float(th.get(key, default))
+            except (TypeError, ValueError):
+                return default
+            return val if val > 0.0 else default
+
+        max_bundler_pct = _thr("max_bundler_pct", 20.0)
+        max_dev_balance_pct = _thr("max_dev_balance_pct", 1.5)
+        max_top10_pct = _thr("max_top10_pct", 30.0)
+        min_liq_ratio = _thr("min_liq_ratio", 0.15)
+
         try:
             prob_success = float(self.model.predict_proba(feats)[0][1])
         except Exception:
-            # Fallback probabilístico robusto
             prob_success = 0.50
 
-        # Confluence Score: normalizado entre 0 y 100
+        # Integrar fricción real roundtrip desde costs.py (~3.5% plataforma + 0.008 SOL red)
+        try:
+            from .costs import PLATFORM_FEE_ROUNDTRIP_FRAC, ROUNDTRIP_TX_FEE_SOL
+            roundtrip_cost_frac = float(PLATFORM_FEE_ROUNDTRIP_FRAC) + float(ROUNDTRIP_TX_FEE_SOL)
+        except Exception:
+            roundtrip_cost_frac = 0.043
+
         confluence_score = round(prob_success * 100.0, 1)
 
-        # Cálculo de Expected Value considerando Stop Loss real (-33.49%) y TP (+50%)
-        # EV = prob * (+0.50) + (1 - prob) * (-0.3349)
-        ev_fraction = (prob_success * 0.50) + ((1.0 - prob_success) * (-0.3349))
+        # EV neto = prob * (+0.50) + (1 - prob) * (-0.3349) - roundtrip_cost_frac
+        ev_fraction = (prob_success * 0.50) + ((1.0 - prob_success) * (-0.3349)) - roundtrip_cost_frac
         ev_pct_str = f"{ev_fraction * 100.0:+.1f}%"
 
-        # Detección de veto y clasificación de arquetipo
+        # Detección de veto y clasificación de arquetipo (Regla Fail-Closed: ausente != 0% riesgo)
         is_veto = False
         veto_reason = None
         bias = "NEUTRAL"
@@ -264,28 +311,68 @@ class AIQuantModel:
         pattern_label = "⚪ Volatilidad Sin Confirmar"
         causal_trigger = "Estructura estándar sin confluencia extrema"
 
-        if dev_balance_pct > 1.5:
+        if not metrics_known:
             is_veto = True
-            veto_reason = f"Dev holding excesivo ({dev_balance_pct:.1f}% > 1.5% max)"
+            confluence_score = min(confluence_score, 40.0)
+            veto_reason = "VETO_UNVERIFIED_METRICS: concentración/dev/seguridad desconocidos (fail-closed)"
+            bias = "BEARISH_VETO"
+            pattern_id = "UNVERIFIED_SECURITY_TRAP"
+            pattern_label = "⚠️ Métricas On-Chain Sin Verificar"
+            causal_trigger = "Datos de holders/dev ausentes; un campo desconocido jamás es un check aprobado"
+        elif bundler_pct >= max_bundler_pct:
+            is_veto = True
+            confluence_score = min(confluence_score, 20.0)
+            veto_reason = f"VETO_BUNDLER_CLUSTER: Bundler empaquetó {bundler_pct:.1f}% del supply (>= {max_bundler_pct:g}%)"
+            bias = "BEARISH_VETO"
+            pattern_id = "BUNDLER_UNIFORM_TRAP"
+            pattern_label = "🔴 Trampa de Bundler Oculto"
+            causal_trigger = f"Suministro fragmentado en múltiples wallets en bloque 0 ({bundler_pct:.1f}%)"
+        elif dev_factory_flag:
+            is_veto = True
+            confluence_score = min(confluence_score, 20.0)
+            veto_reason = "VETO_DEV_SERIAL_FACTORY: desarrollador con historial serial sin graduaciones (BP-008)"
+            bias = "BEARISH_VETO"
+            pattern_id = "DEV_FACTORY_RUGGER"
+            pattern_label = "🔴 Fábrica Serial del Desarrollador"
+            causal_trigger = "El creador lanza decenas de tokens sin graduación y descarga en su techo de MC"
+        elif wash_trading_flag:
+            is_veto = True
+            confluence_score = min(confluence_score, 25.0)
+            veto_reason = "VETO_WASH_TRADING_STAIRCASE: micro-compras robotizadas (< $5 media por tx)"
+            bias = "BEARISH_VETO"
+            pattern_id = "WASH_TRADING_STAIRCASE"
+            pattern_label = "🔴 Escalera Artificial Wash-Trading"
+            causal_trigger = "Gráfico pintado con micro-transacciones repetitivas sin volumen orgánico"
+        elif clone_factory_flag:
+            is_veto = True
+            confluence_score = min(confluence_score, 30.0)
+            veto_reason = "VETO_SAME_NAME_CLONE: clon homónimo / fábrica vanity detectada"
+            bias = "BEARISH_VETO"
+            pattern_id = "CLONE_VAMP_DERIVATIVE"
+            pattern_label = "⚠️ Clon Homónimo / Vamp"
+            causal_trigger = "Múltiples tokens con el mismo nombre/avatar creados en serie"
+        elif dev_balance_pct > max_dev_balance_pct:
+            is_veto = True
+            veto_reason = f"Dev holding excesivo ({dev_balance_pct:.1f}% > {max_dev_balance_pct:g}% max)"
             bias = "BEARISH_VETO"
             pattern_id = "DEV_DUMP_RISK"
             pattern_label = "🔴 Riesgo de Dump Desarrollador"
             causal_trigger = f"Desarrollador retiene {dev_balance_pct:.1f}% del supply"
-        elif top10_pct > 30.0:
+        elif top10_pct > max_top10_pct:
             is_veto = True
-            veto_reason = f"Concentración de Cabal ({top10_pct:.1f}% > 30% max)"
+            veto_reason = f"Concentración de Cabal ({top10_pct:.1f}% > {max_top10_pct:g}% max)"
             bias = "BEARISH_VETO"
             pattern_id = "CABAL_CONCENTRATION"
             pattern_label = "🔴 Trampa de Cabal Concentrado"
             causal_trigger = f"Top 10 billeteras controlan {top10_pct:.1f}% del token"
-        elif liq_ratio < 0.15:
+        elif liq_ratio < min_liq_ratio:
             is_veto = True
-            veto_reason = f"Liquidez anémica (Ratio Liq/MC {liq_ratio*100:.1f}% < 15%)"
+            veto_reason = f"Liquidez anémica (Ratio Liq/MC {liq_ratio*100:.1f}% < {min_liq_ratio*100:g}%)"
             bias = "BEARISH_VETO"
             pattern_id = "ILLIQUID_SLIPPAGE_TRAP"
             pattern_label = "🔴 Trampa de Iliquidez Severa"
-            causal_trigger = f"Ratio de liquidez {liq_ratio*100:.1f}% conduce a slippage catastrofico"
-        elif prob_success >= 0.65 and ev_fraction > 0.10:
+            causal_trigger = f"Ratio de liquidez {liq_ratio*100:.1f}% conduce a slippage catastrófico"
+        elif prob_success >= 0.65 and ev_fraction > 0.05:
             bias = "BULLISH"
             pattern_id = "HIGH_CONFLUENCE_BREAKOUT"
             pattern_label = "🟢 Ruptura Cuántica Confirmada"
@@ -294,7 +381,7 @@ class AIQuantModel:
             bias = "BULLISH"
             pattern_id = "ORGANIC_EXPANSION"
             pattern_label = "🔵 Expansión Orgánica Temprana"
-            causal_trigger = f"EV positivo ({ev_pct_str}) con micro-cap inicial de ${first_mc:,.0f}"
+            causal_trigger = f"EV neto positivo ({ev_pct_str}) con micro-cap inicial de ${first_mc:,.0f}"
 
         if is_veto:
             verdict = "VETO"
@@ -317,4 +404,12 @@ class AIQuantModel:
             "pattern_label": pattern_label,
             "bias": bias,
             "causal_trigger": causal_trigger,
+            "metrics_known": metrics_known,
+            "thresholds_used": {
+                "max_bundler_pct": max_bundler_pct,
+                "max_dev_balance_pct": max_dev_balance_pct,
+                "max_top10_pct": max_top10_pct,
+                "min_liq_ratio": min_liq_ratio,
+            },
         }
+

@@ -16,12 +16,13 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from detector.live_store import LiveStore, _decision_sig
+from detector.metrics_registry import claimed_wr, claimed_pf
 
 
 class _FakeDecision:
     """Stub de MasterSignalDecision para no acoplar el test al motor."""
     def __init__(self, admitted, branch, confidence=0.8,
-                 expected_winrate=0.6, expected_profit_factor=2.0,
+                 expected_winrate=claimed_wr("test_gate_wr"), expected_profit_factor=claimed_pf("test_gate_pf"),
                  veto_reason=None):
         self.admitted = admitted
         self.branch = branch
@@ -275,6 +276,42 @@ class TestBranchExitPolicy(unittest.TestCase):
         pol_live = st.branch_exit_policy(origin="live")
         self.assertEqual(pol_live[0]["n_labeled"], 3)
         self.assertAlmostEqual(pol_live[0]["median_mfe_pct"], 90.0)
+
+    def test_concurrent_trace_writes_from_many_threads_do_not_raise(self):
+        """Regresión: el bucle autónomo + ciclo + hilos HTTP escriben a la vez.
+
+        Con una sola conexión compartida (``check_same_thread=False``) SQLite
+        lanzaba "bad parameter or other API misuse" y las trazas de decisión se
+        perdían en silencio (memoria de selecciones incompleta).
+        """
+        import threading as _th
+
+        st = self._store()
+        errors: list = []
+        n_threads, n_writes = 6, 25
+
+        def _worker(tid: int) -> None:
+            try:
+                for i in range(n_writes):
+                    st.append_decision_trace(
+                        trace_id=f"t{tid}-{i:03d}", mint=f"MINT{tid}", symbol="TOK",
+                        ts=1000.0 + i,
+                        stages=[{"stage": "E0_discovery", "value": 1.0,
+                                 "verdict": "pass", "reason": "real"}],
+                    )
+            except Exception as exc:  # noqa: BLE001 - se reporta al final
+                errors.append(f"{type(exc).__name__}: {exc}")
+
+        threads = [_th.Thread(target=_worker, args=(t,)) for t in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [], f"escrituras concurrentes fallaron: {errors}")
+        rows = st._con.execute("SELECT COUNT(*) FROM decision_traces").fetchone()[0]
+        self.assertEqual(rows, n_threads * n_writes,
+                         "se perdieron trazas: la memoria de selecciones no está completa")
 
 
 if __name__ == "__main__":

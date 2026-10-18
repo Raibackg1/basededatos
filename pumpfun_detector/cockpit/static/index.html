@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#07090e" />
 <title>Pumpfun Quant Cockpit — Terminal IA & Detector de Patrones</title>
 <style>
   :root {
+    color-scheme: dark;
     --bg: #07090e;
     --bg-card: #0c121d;
     --bg-card-hover: #111a29;
@@ -30,7 +32,7 @@
     width: 100%;
     background: var(--bg);
     color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     font-size: 12px;
     overflow: hidden;
     user-select: none;
@@ -107,7 +109,7 @@
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -158,7 +160,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    transition: all 0.2s;
+    transition: color 0.2s, background 0.2s, box-shadow 0.2s;
   }
   .bot-toggle-btn:hover {
     background: var(--neon-green);
@@ -220,6 +222,10 @@
     flex: 1;
     max-width: 380px;
   }
+  .search-wrap:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+  }
   .search-input {
     background: transparent;
     border: none;
@@ -241,7 +247,7 @@
     border-radius: 5px;
     font-size: 11px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
   }
   .filter-chip:hover {
     color: #fff;
@@ -293,7 +299,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
     cursor: pointer;
   }
@@ -452,7 +458,7 @@
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.2s, color 0.2s, box-shadow 0.2s;
   }
   .btn-snipe:hover {
     background: var(--neon-green);
@@ -565,7 +571,7 @@
     font-size: 12px;
     font-weight: 800;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: box-shadow 0.2s, filter 0.2s;
     text-align: center;
     margin-top: 4px;
   }
@@ -757,7 +763,7 @@
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7);
     transform: translateY(100px);
     opacity: 0;
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   #toast.show {
     transform: translateY(0);
@@ -894,6 +900,536 @@
   .accent { color: var(--accent); }
   .dim { color: var(--dim); }
   button { font-family: inherit; }
+
+  /* =========================================================================
+     WEB INTERFACE GUIDELINES (P2): foco visible, motion reducido, tabular nums
+     ========================================================================= */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button { touch-action: manipulation; }
+  .ticker-val, .bot-hud-val, .cm-val, .ladder-val, .funnel-val,
+  table.pro-table td { font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* =========================================================================
+     VIEW PIPELINE: DIAGRAMA DE DECISIÓN FILTRADA EN VIVO (P2)
+     ========================================================================= */
+  #view-pipeline {
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+    overflow-y: auto;
+  }
+  .pipeline-funnel-wrap {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .pipeline-title-row { display: flex; justify-content: space-between; align-items: center; }
+  .pipeline-title { font-weight: 800; font-size: 13px; }
+  .funnel-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .funnel-card {
+    background: #080d16;
+    border: 1px solid #141c2b;
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .funnel-card .funnel-label {
+    font-size: 9.5px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .funnel-card .funnel-val { font-size: 18px; font-weight: 800; }
+  .funnel-card .funnel-sub { font-size: 9.5px; color: var(--dim); }
+  .funnel-bar {
+    display: flex;
+    height: 9px;
+    border-radius: 5px;
+    overflow: hidden;
+    background: #0a101b;
+    border: 1px solid var(--border);
+  }
+  .funnel-seg { height: 100%; }
+  .funnel-seg.admitted { background: var(--neon-green); }
+  .funnel-seg.neutral { background: var(--warn); }
+  .funnel-seg.veto { background: var(--bad); }
+  .pipeline-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 12px; }
+  #view-pipeline .table-box { max-height: 320px; overflow-y: auto; }
+  .pipeline-detail {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .pipeline-stages { display: flex; flex-direction: column; gap: 4px; }
+  .stage-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 5px 8px;
+    border-left: 3px solid var(--border-bright);
+    background: #080d16;
+    border-radius: 4px;
+    font-size: 10px;
+  }
+  .stage-row.pass { border-left-color: var(--ok); }
+  .stage-row.fail { border-left-color: var(--bad); }
+  .stage-row.skip { border-left-color: #334155; opacity: 0.65; }
+  .stage-row.info { border-left-color: var(--accent); }
+  .stage-name { flex: 1; color: var(--fg); }
+  .stage-meta { font-family: monospace; font-size: 9.5px; color: var(--dim); text-align: right; }
+  .stage-kind {
+    font-size: 8.5px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  .stage-kind.adaptive_rule { color: var(--neon-green); border-color: var(--neon-green); }
+  .pipeline-console-wrap {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pipeline-console-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 11px; }
+  .pipeline-console {
+    height: 190px;
+    overflow-y: auto;
+    background: #05080d;
+    border: 1px solid #10192a;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-family: monospace;
+    font-size: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .console-row { display: flex; gap: 8px; align-items: baseline; }
+  .console-ts { color: var(--dim); flex: 0 0 62px; }
+  .console-kind { flex: 0 0 92px; font-weight: 700; }
+  .console-kind.stage { color: var(--accent); }
+  .console-kind.decision { color: var(--accent); }
+  .console-kind.trade_open { color: var(--neon-green); }
+  .console-kind.trade_close { color: var(--neon-green); }
+  .console-kind.evo { color: var(--purple); }
+  .console-kind.feed { color: var(--warn); }
+  .console-kind.error { color: var(--bad); }
+  .console-msg { color: var(--fg); }
+
+  /* =========================================================================
+     PULIDO GLOBAL: superficies, scrollbars y jerarquía visual
+     ========================================================================= */
+  *::-webkit-scrollbar { width: 9px; height: 9px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: #1e2c42;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: #2d4260; background-clip: content-box; }
+
+  /* =========================================================================
+     VIEW 7: ANALÍTICA DE RENDIMIENTO (informe real sobre operaciones cerradas)
+     ========================================================================= */
+  #view-analytics {
+    flex-direction: column;
+    padding: 14px;
+    gap: 12px;
+    overflow-y: auto;
+    background: radial-gradient(circle at 12% 0%, rgba(0, 229, 255, 0.035) 0%, transparent 42%),
+                radial-gradient(circle at 92% 100%, rgba(0, 255, 170, 0.03) 0%, transparent 40%),
+                var(--bg);
+  }
+  .an-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .an-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .an-title h2 { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+  .an-sub { font-size: 10.5px; color: var(--dim); font-family: monospace; }
+  .an-periods { display: flex; gap: 4px; background: #090e17; border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
+  .an-period {
+    background: transparent; border: 1px solid transparent; color: var(--dim);
+    padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: color 0.18s, background 0.18s, border-color 0.18s;
+  }
+  .an-period:hover { color: #fff; background: rgba(255, 255, 255, 0.05); }
+  .an-period.active { background: #142236; color: var(--accent); border-color: rgba(0, 229, 255, 0.35); }
+  .an-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .an-kpi {
+    background: linear-gradient(152deg, #0e1626 0%, #0b1220 100%);
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 5px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+    transition: border-color 0.18s, transform 0.18s;
+  }
+  .an-kpi:hover { border-color: var(--border-bright); transform: translateY(-1px); }
+  .an-kpi-label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .an-kpi-val { font-size: 20px; font-weight: 800; font-family: monospace; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .an-kpi-foot { font-size: 10px; color: var(--dim); font-family: monospace; }
+  .an-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr); gap: 12px; }
+  .an-panel {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  }
+  .an-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .an-panel-title { font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; }
+  .an-panel-note { font-size: 10px; color: var(--dim); font-family: monospace; }
+  .an-chart-wrap { position: relative; }
+  .an-svg { width: 100%; height: auto; display: block; }
+  .an-chart-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--dim); font-family: monospace; margin-top: 4px; }
+  .an-donut-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .an-donut { width: 128px; height: 128px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto; }
+  .an-donut-hole {
+    width: 84px; height: 84px; border-radius: 50%; background: var(--bg-card);
+    display: grid; place-items: center; text-align: center; line-height: 1.05;
+    border: 1px solid var(--border);
+  }
+  .an-donut-hole b { font-size: 20px; font-family: monospace; }
+  .an-donut-hole span { font-size: 9px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .an-legend { list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 11px; flex: 1; min-width: 150px; }
+  .an-legend li { display: flex; align-items: center; gap: 8px; }
+  .an-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }
+  .an-legend b { margin-left: auto; font-family: monospace; font-variant-numeric: tabular-nums; }
+  .an-legend .lg-win { background: var(--neon-green); }
+  .an-legend .lg-loss { background: var(--bad); }
+  .an-legend .lg-flat { background: #5b6b80; }
+  .an-hist { display: flex; align-items: flex-end; gap: 5px; height: 132px; padding-top: 4px; }
+  .an-hist-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; height: 100%; }
+  .an-hist-count { font-size: 9px; color: var(--dim); font-family: monospace; }
+  .an-hist-bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 3px; }
+  .an-hist-bar.win { background: linear-gradient(180deg, var(--neon-green), rgba(0, 255, 170, 0.3)); }
+  .an-hist-bar.loss { background: linear-gradient(180deg, var(--bad), rgba(255, 51, 102, 0.3)); }
+  .an-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .an-table th {
+    text-align: left; color: var(--dim); font-weight: 600; padding: 6px 8px;
+    border-bottom: 1px solid var(--border); text-transform: uppercase;
+    font-size: 9.5px; letter-spacing: 0.05em;
+  }
+  .an-table td { padding: 7px 8px; border-bottom: 1px solid #141c2a; font-family: monospace; font-variant-numeric: tabular-nums; }
+  .an-table tr:last-child td { border-bottom: 0; }
+  .an-table tr:hover { background: rgba(255, 255, 255, 0.02); }
+  .an-empty { padding: 24px; text-align: center; color: var(--dim); font-size: 11.5px; }
+  @media (max-width: 1100px) {
+    .an-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .an-grid { grid-template-columns: 1fr; }
+  }
+
+  /* =========================================================================
+     VIEW 8: TOKENS & PROCESO DE SELECCIÓN (cableado, filtros, diagramas, memoria)
+     ========================================================================= */
+  #view-tokens { flex-direction: column; padding: 14px; gap: 12px; overflow-y: auto; }
+  .tk-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .tk-title { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+
+  /* Tira de cableado: cada subsistema con su estado REAL, no decorativo */
+  .wire-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+  .wire-chip {
+    display: flex; align-items: center; gap: 7px; padding: 7px 11px;
+    background: linear-gradient(152deg, #0e1626, #0b1220);
+    border: 1px solid var(--border); border-radius: 9px;
+    font-size: 10.5px; font-family: monospace; white-space: nowrap;
+  }
+  .wire-chip .k { color: var(--dim); letter-spacing: 0.05em; }
+  .wire-chip.on { border-color: rgba(0, 255, 170, 0.4); }
+  .wire-chip.warn { border-color: rgba(245, 158, 11, 0.45); }
+  .wire-chip.off { border-color: rgba(255, 51, 102, 0.45); }
+  .wire-dot { width: 7px; height: 7px; border-radius: 50%; background: #5b6b80; flex: 0 0 auto; }
+  .wire-dot.on { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green-glow); }
+  .wire-dot.warn { background: var(--warn); }
+  .wire-dot.off { background: var(--bad); }
+
+  .tk-subbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .tk-field { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--dim); }
+  .tk-field input, .tk-field select {
+    background: #070b12; border: 1px solid var(--border); color: #fff; border-radius: 5px;
+    padding: 5px 7px; font-size: 11px; font-family: monospace; width: 92px;
+  }
+  .tk-field input[type=text] { width: 190px; }
+  .tk-field select { width: auto; }
+  .tk-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.95fr); gap: 12px; }
+  .tk-panel {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  }
+  .tk-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .tk-panel-title { font-size: 11.5px; font-weight: 700; }
+  .tk-panel-note { font-size: 10px; color: var(--dim); font-family: monospace; }
+  .tk-bubble { width: 100%; height: auto; display: block; }
+  .tk-funnel { display: flex; flex-direction: column; gap: 6px; }
+  .tk-stage { display: flex; align-items: center; gap: 9px; font-size: 11px; }
+  .tk-stage-lbl { flex: 0 0 178px; color: var(--dim); }
+  .tk-stage-bar { flex: 1; height: 16px; background: #0b1220; border: 1px solid #141c2b; border-radius: 4px; overflow: hidden; }
+  .tk-stage-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), rgba(0, 229, 255, 0.3)); }
+  .tk-stage-fill.fail { background: linear-gradient(90deg, var(--bad), rgba(255, 51, 102, 0.3)); }
+  .tk-stage-val { flex: 0 0 54px; text-align: right; font-family: monospace; }
+  .tk-flow { display: flex; flex-direction: column; gap: 5px; }
+  .tk-step { display: flex; align-items: center; gap: 8px; font-size: 10.5px; }
+  .tk-step-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: #3a4657; }
+  .tk-step.pass .tk-step-dot { background: var(--neon-green); }
+  .tk-step.fail .tk-step-dot { background: var(--bad); }
+  .tk-step.info .tk-step-dot { background: var(--accent); }
+  .tk-step-name { flex: 0 0 196px; }
+  .tk-step-verdict { font-family: monospace; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tk-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .tk-table th {
+    text-align: left; color: var(--dim); font-weight: 600; padding: 6px 8px;
+    border-bottom: 1px solid var(--border); text-transform: uppercase;
+    font-size: 9.5px; letter-spacing: 0.05em;
+  }
+  .tk-table td { padding: 6px 8px; border-bottom: 1px solid #141c2a; font-family: monospace; font-variant-numeric: tabular-nums; }
+  .tk-table tbody tr { cursor: pointer; }
+  .tk-table tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+  .tk-table tbody tr.sel { background: #142236; }
+  .tk-memory { display: flex; flex-direction: column; gap: 6px; max-height: 330px; overflow-y: auto; }
+  .tk-mem-row {
+    display: flex; align-items: center; gap: 9px; font-size: 10.5px; padding: 6px 8px;
+    border: 1px solid #141c2b; border-radius: 7px; background: #0a101b; cursor: pointer;
+  }
+  .tk-mem-row:hover { border-color: var(--border-bright); }
+  .tk-mem-ts { font-family: monospace; color: var(--dim); flex: 0 0 58px; }
+  .tk-mem-sym { font-weight: 700; flex: 0 0 94px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tk-mem-verdict { font-family: monospace; flex: 0 0 86px; }
+  .tk-mem-why { color: var(--dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tk-gate { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tk-gate-item { flex: 1; min-width: 148px; border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; background: #0b1220; }
+  .tk-gate-item .k { font-size: 9.5px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; display: block; }
+  .tk-gate-item .v { font-size: 16px; font-weight: 800; font-family: monospace; margin-top: 5px; display: block; }
+  .tk-gate-verdict { font-size: 11.5px; line-height: 1.5; }
+  @media (max-width: 1200px) { .tk-grid { grid-template-columns: 1fr; } }
+
+  /* ── MODERN QUANT COCKPIT ACTIONS & DESKTOP TELEMETRY ── */
+  .hdr-action-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 4px 9px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+  }
+  .hdr-action-btn:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: var(--border-bright);
+    color: #fff;
+  }
+  .hdr-action-btn.accent {
+    background: rgba(0, 229, 255, 0.1);
+    border-color: rgba(0, 229, 255, 0.35);
+    color: var(--accent);
+  }
+  .hdr-action-btn.accent:hover {
+    background: rgba(0, 229, 255, 0.2);
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  .hdr-action-btn kbd {
+    background: #060a10;
+    border: 1px solid #1f2e45;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 9.5px;
+    font-family: monospace;
+    color: var(--dim);
+  }
+  .telemetry-pill {
+    border-color: rgba(0, 229, 255, 0.2) !important;
+    background: #080d16 !important;
+  }
+
+  /* ── COMMAND PALETTE (CTRL+K) ── */
+  .cmd-palette-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 7, 12, 0.75);
+    backdrop-filter: blur(10px);
+    z-index: 9999;
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 10vh;
+  }
+  .cmd-palette-backdrop.open { display: flex; }
+  .cmd-palette-box {
+    width: 620px;
+    max-width: 92vw;
+    background: #0c121e;
+    border: 1px solid var(--border-bright);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85), 0 0 25px rgba(0, 229, 255, 0.12);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: cmdPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes cmdPop {
+    from { opacity: 0; transform: scale(0.96) translateY(-10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .cmd-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    background: #0f1827;
+  }
+  .cmd-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 14px;
+    color: #fff;
+    font-family: inherit;
+  }
+  .cmd-list {
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .cmd-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 12px;
+    border-radius: 6px;
+    color: var(--fg);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .cmd-item:hover, .cmd-item.selected {
+    background: #142236;
+    color: var(--accent);
+  }
+  .cmd-item-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .cmd-item kbd {
+    font-size: 10px;
+    color: var(--dim);
+    font-family: monospace;
+    background: #07090e;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #1a2538;
+  }
+
+  /* ── AI CO-PILOT SLIDE-OVER DRAWER (CTRL+J) ── */
+  .ai-drawer {
+    position: fixed;
+    top: 48px;
+    bottom: 0;
+    right: 0;
+    width: 440px;
+    max-width: 95vw;
+    background: rgba(10, 16, 26, 0.96);
+    border-left: 1px solid var(--border-bright);
+    box-shadow: -10px 0 35px rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(16px);
+    z-index: 2000;
+    transform: translateX(100%);
+    transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+  }
+  .ai-drawer.open {
+    transform: translateX(0);
+  }
+  .ai-drawer-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(8, 13, 21, 0.85);
+  }
+  .ai-drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ai-drawer-footer {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    background: rgba(8, 13, 21, 0.95);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* ── SHORTCUTS MODAL ── */
+  .shortcuts-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 7, 12, 0.75);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .shortcuts-backdrop.open { display: flex; }
+  .shortcuts-card {
+    width: 540px;
+    max-width: 90vw;
+    background: #0c121d;
+    border: 1px solid var(--border-bright);
+    border-radius: 12px;
+    padding: 22px;
+    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.85);
+  }
+  .shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #141c2b;
+    font-size: 12px;
+  }
 </style>
 </head>
 <body>
@@ -921,23 +1457,48 @@
     <button class="nav-btn" id="btn-mode-bot" onclick="switchMainMode('bot')">
       <span>⚡</span> Bot Auto-Trader & Posiciones
     </button>
+    <button class="nav-btn" id="btn-mode-pipeline" onclick="switchMainMode('pipeline')">
+      <span>🔬</span> Pipeline en Vivo
+    </button>
     <button class="nav-btn" id="btn-mode-3d" onclick="switchMainMode('3d')">
       <span>🧊</span> Visor 3D Causal Forense
+    </button>
+    <button class="nav-btn" id="btn-mode-analytics" onclick="switchMainMode('analytics')">
+      <span>📊</span> Análisis de Rendimiento
+    </button>
+    <button class="nav-btn" id="btn-mode-tokens" onclick="switchMainMode('tokens')">
+      <span>🧭</span> Tokens & Selección
     </button>
   </nav>
 
   <!-- LIVE TICKER & BOT TOGGLE -->
   <div class="top-right">
-    <div class="ticker-pill">
-      <div class="ticker-item"><span class="ticker-label">SOL:</span><span class="ticker-val" id="top-sol">$150.00</span></div>
-      <div class="ticker-item"><span class="ticker-label">WR:</span><span class="ticker-val neon-green" id="top-wr">0%</span></div>
-      <div class="ticker-item"><span class="ticker-label">PnL:</span><span class="ticker-val neon-green" id="top-pnl">+0.00 SOL</span></div>
-      <div class="ticker-item"><span class="ticker-label">Abiertas:</span><span class="ticker-val" id="top-open-count">0</span></div>
+    <div class="ticker-pill telemetry-pill" id="telemetry-pill" title="Telemetría de Hardware y Python">
+      <div class="ticker-item"><span class="ticker-label">CPU:</span><span class="ticker-val" id="top-cpu">—%</span></div>
+      <div class="ticker-item"><span class="ticker-label">RAM:</span><span class="ticker-val" id="top-ram">—</span></div>
     </div>
-    <button class="bot-toggle-btn" id="btn-bot-toggle" onclick="toggleAutoBot()">
-      <span>🤖</span> BOT IA: ACTIVO
+    <div class="ticker-pill">
+      <div class="ticker-item"><span class="ticker-label">SOL:</span><span class="ticker-val" id="top-sol">—</span></div>
+      <div class="ticker-item"><span class="ticker-label">WR:</span><span class="ticker-val neon-green" id="top-wr">—</span></div>
+      <div class="ticker-item"><span class="ticker-label">PnL:</span><span class="ticker-val neon-green" id="top-pnl">—</span></div>
+      <div class="ticker-item"><span class="ticker-label">Abiertas:</span><span class="ticker-val" id="top-open-count">—</span></div>
+    </div>
+    <button class="hdr-action-btn" onclick="toggleCommandPalette()" title="Comandos Rápidos (Ctrl+K)">
+      <kbd>Ctrl+K</kbd>
     </button>
-    <button class="filter-chip" onclick="refreshAll()" title="Recargar datos">↺</button>
+    <button class="hdr-action-btn accent" onclick="toggleAiDrawer()" title="Copiloto IA en Vivo (Ctrl+J)">
+      <span>✨</span> Copilot
+    </button>
+    <button class="hdr-action-btn" onclick="popoutActiveMode()" title="Separar en ventana externa (Dual Monitor)">
+      ⧉
+    </button>
+    <button class="hdr-action-btn" onclick="toggleShortcutsModal()" title="Atajos de Teclado (F1)">
+      ⌨
+    </button>
+    <button class="bot-toggle-btn" id="btn-bot-toggle" onclick="toggleAutoBot()">
+      <span>🤖</span> BOT IA: …
+    </button>
+    <button class="filter-chip" onclick="refreshAll()" title="Recargar datos" aria-label="Recargar datos">↺</button>
   </div>
 </header>
 
@@ -949,11 +1510,12 @@
   <div class="radar-subbar">
     <div class="search-wrap">
       <span>🔍</span>
-      <input type="text" id="radar-search" class="search-input" placeholder="Filtrar por Símbolo, Token o CA (e.g. ALPHA, SoL1111...)" oninput="filterTokenStream()" />
+      <input type="text" id="radar-search" class="search-input" placeholder="Filtrar o pegar CA Solana / BSC 0x... (ej. 0x8a5d...4444)" oninput="filterTokenStream()" onkeydown="if(event.key==='Enter') inspectContractFromUi()" />
+      <button class="filter-chip" style="padding:4px 10px; border-color:var(--accent); color:var(--accent); font-weight:700;" onclick="inspectContractFromUi()" title="Escaneo Forense Multi-Fuente (DexScreener + GoPlus + RugCheck)">⚡ Dossier GMGN</button>
     </div>
 
     <div class="filter-chips">
-      <button class="filter-chip active" onclick="setCategoryFilter('ALL', this)">Todos (<span id="cnt-all">0</span>)</button>
+      <button class="filter-chip active" id="chip-cat-all" onclick="setCategoryFilter('ALL', this)">Todos (<span id="cnt-all">0</span>)</button>
       <button class="filter-chip" onclick="setCategoryFilter('HIGH_SCORE', this)">🟢 Alta Confluencia (≥ 80)</button>
       <button class="filter-chip" onclick="setCategoryFilter('SMART_MONEY', this)">🎯 Smart Money</button>
       <button class="filter-chip" onclick="setCategoryFilter('EXPANSION', this)">🔵 Expansión Orgánica</button>
@@ -1034,9 +1596,9 @@
         </div>
       </div>
 
-      <!-- ORDER PAD -->
+      <!-- ORDER PAD & ANNOTATION STUDIO -->
       <div class="order-pad">
-        <div style="font-size:11px; font-weight:700;">Ejecución Inmediata Paper Forward</div>
+        <div style="font-size:11px; font-weight:700;">Ejecución Inmediata Paper Forward &amp; Etiquetado ML</div>
         <div class="order-sizes">
           <div class="size-chip" onclick="selectOrderSize(0.5, this)">0.5 SOL</div>
           <div class="size-chip active" onclick="selectOrderSize(1.0, this)">1.0 SOL</div>
@@ -1046,7 +1608,15 @@
         <button class="btn-submit-order" id="btn-insp-buy" onclick="executeInspectorOrder()">
           ⚡ EJECUTAR COMPRA PAPER
         </button>
-        <button class="filter-chip" style="width:100%; padding:8px; border-color:var(--purple); color:var(--purple); margin-top:6px; font-weight:700;" onclick="auditSelectedTokenWithAi()">
+        <div style="display:flex; gap:6px; margin-top:4px;">
+          <button class="filter-chip" style="flex:1; padding:6px; border-color:var(--ok); color:var(--ok); font-weight:700;" onclick="submitInspectorAnnotation('BUY')">
+            ✅ Anotar BUY (ML)
+          </button>
+          <button class="filter-chip" style="flex:1; padding:6px; border-color:var(--bad); color:var(--bad); font-weight:700;" onclick="submitInspectorAnnotation('AVOID')">
+            🚫 Anotar VETO (ML)
+          </button>
+        </div>
+        <button class="filter-chip" style="width:100%; padding:8px; border-color:var(--purple); color:var(--purple); margin-top:4px; font-weight:700;" onclick="auditSelectedTokenWithAi()">
           🧠 AUDITORÍA FORENSE IA REAL
         </button>
       </div>
@@ -1085,16 +1655,17 @@
     <!-- QUICK ACTION CHIPS -->
     <div class="ai-chips-bar">
       <button class="filter-chip" onclick="quickAiCommand('/boost')">⚡ /boost (Recalibrar ML)</button>
+      <button class="filter-chip" onclick="quickAiCommand('/evolve')">🧬 /evolve (Auto-Mejora Post-Mortem)</button>
+      <button class="filter-chip" onclick="quickAiCommand('/shadow')">🛡️ /shadow (¿Veto Ganó o Perdió?)</button>
       <button class="filter-chip" onclick="quickAiCommand('/goal')">🎯 /goal (Ver Objetivos)</button>
       <button class="filter-chip" onclick="quickAiCommand('/goal eval')">📊 /goal eval (Supervisar Metas)</button>
       <button class="filter-chip" onclick="quickAiBrowserCommand()">🌐 /browser (Auditar DexScreener)</button>
       <button class="filter-chip" onclick="quickAiCommand('Analiza los 3 tokens con mejor confluencia en el radar')">🔍 Top 3 Tokens</button>
-      <button class="filter-chip" onclick="quickAiCommand('Explica la politica estricta de Stop Loss -33.49% real')">🛡️ Riesgo Real</button>
     </div>
 
     <!-- PROMPT INPUT BAR -->
     <div class="ai-prompt-bar">
-      <input type="text" id="ai-prompt-input" class="ai-input" placeholder="Pregunta a la IA o escribe un comando (/boost, /goal, /browser)..." onkeydown="if(event.key==='Enter') sendAiMessage()" />
+      <input type="text" id="ai-prompt-input" class="ai-input" placeholder="Pregunta a la IA o escribe un comando (/boost, /evolve, /shadow, /goal, /browser)..." onkeydown="if(event.key==='Enter') sendAiMessage()" />
       <button class="btn-submit-order" style="padding: 6px 16px; margin: 0;" onclick="sendAiMessage()">Enviar</button>
     </div>
   </div>
@@ -1105,12 +1676,13 @@
     <div class="ai-box">
       <div class="ai-box-title">
         <span>⚙️ Configuración del Motor IA</span>
-        <span class="shield-badge safe" id="ai-provider-badge">GEMINI CONECTADO</span>
+        <span class="shield-badge warn" id="ai-provider-badge">N/D — sin dato</span>
       </div>
       <div style="display:flex; flex-direction:column; gap:8px; font-size:11px;">
         <label>
           <span class="dim">Proveedor LLM:</span>
           <select id="ai-provider-select" style="width:100%; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; margin-top:3px;" onchange="updateProviderOptions()">
+            <option value="openrouter">OpenRouter (465+ Modelos: Claude, DeepSeek, GPT-4o, Llama)</option>
             <option value="gemini">Google Gemini (Gemini 2.5 Flash)</option>
             <option value="ollama">Ollama Local (Open-Source 11434)</option>
             <option value="groq">Groq Cloud (Llama 3.3 70B)</option>
@@ -1122,8 +1694,8 @@
           <label>
             <span class="dim" id="ai-key-label">API Key:</span>
             <div style="display:flex; gap:4px; margin-top:3px;">
-              <input type="password" id="ai-key-input" placeholder="Pega tu API Key..." style="flex:1; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; font-size:11px;" />
-              <button type="button" class="filter-chip" style="padding:4px 8px;" onclick="toggleKeyVisibility()">👁️</button>
+              <input type="password" id="ai-key-input" placeholder="Pega tu API Key (sk-or-v1-... / AIza...)" style="flex:1; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; font-size:11px;" />
+              <button type="button" class="filter-chip" style="padding:4px 8px;" onclick="toggleKeyVisibility()" aria-label="Mostrar u ocultar API key">👁️</button>
             </div>
           </label>
         </div>
@@ -1139,8 +1711,19 @@
         </div>
 
         <label>
-          <span class="dim">Nombre del Modelo:</span>
-          <input type="text" id="ai-model-input" style="width:100%; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; margin-top:3px;" value="gemini-2.5-flash" />
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span class="dim">Nombre del Modelo:</span>
+            <button type="button" class="filter-chip" style="padding:1px 6px; font-size:9.5px;" onclick="detectOpenRouterModelsFromUi()" title="Cargar modelos de OpenRouter en vivo">🌐 Catálogo OpenRouter</button>
+          </div>
+          <input type="text" id="ai-model-input" list="openrouter-models-datalist" style="width:100%; background:#070a10; border:1px solid var(--border); color:var(--fg); padding:6px; border-radius:5px; margin-top:3px;" value="gemini-2.5-flash" />
+          <datalist id="openrouter-models-datalist">
+            <option value="openrouter/auto">OpenRouter Auto (Mejor Modelo Dinámico)</option>
+            <option value="deepseek/deepseek-chat:free">DeepSeek V3 Chat (Free)</option>
+            <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B Instruct (Free)</option>
+            <option value="google/gemini-2.5-flash">Google Gemini 2.5 Flash</option>
+            <option value="anthropic/claude-3.5-sonnet">Anthropic Claude 3.5 Sonnet</option>
+            <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
+          </datalist>
         </label>
 
         <div style="display:flex; gap:6px; margin-top:2px;">
@@ -1159,14 +1742,14 @@
     <div class="ai-box">
       <div class="ai-box-title">
         <span>🚀 Machine Learning Booster (/boost)</span>
-        <span class="shield-badge" id="ml-status-badge">ROC-AUC: 0.9100</span>
+        <span class="shield-badge" id="ml-status-badge">ROC-AUC: N/D</span>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:10.5px;">
         <div style="background:#080d16; padding:8px; border-radius:5px;">
-          <span class="dim">Muestras DB:</span><br/><b id="ml-train-samples">29,598 tokens</b>
+          <span class="dim">Muestras Entrenamiento:</span><br/><b id="ml-train-samples">N/D — sin dato</b>
         </div>
         <div style="background:#080d16; padding:8px; border-radius:5px;">
-          <span class="dim">Precisión Test:</span><br/><b class="ok" id="ml-accuracy">91.66%</b>
+          <span class="dim">Precisión Test (OOS):</span><br/><b class="ok" id="ml-accuracy">N/D — sin dato</b>
         </div>
         <div style="background:#080d16; padding:8px; border-radius:5px;">
           <span class="dim">Modelo:</span><br/><b>HistGradientBoosting</b>
@@ -1204,7 +1787,7 @@
     <div class="ai-box">
       <div class="ai-box-title">
         <span>🌐 Auditor Visual en Navegador (/browser)</span>
-        <span class="shield-badge safe" id="browser-agent-status">PLAYWRIGHT LISTO</span>
+        <span class="shield-badge warn" id="browser-agent-status">N/D — sin dato</span>
       </div>
       <div style="font-size:10.5px; color:var(--dim);">
         Abre y audita en modo headless contratos en DexScreener o Pump.fun capturando captura visual y datos on-chain.
@@ -1268,30 +1851,31 @@
   <!-- BOT HUD -->
   <div class="bot-hud-grid">
     <div class="bot-hud-card">
-      <span class="bot-hud-label">Capital Inicial</span>
-      <span class="bot-hud-val">100.00 SOL</span>
+      <span class="bot-hud-label">Capital Inicial (declarado)</span>
+      <span class="bot-hud-val" id="bot-capital-init">—</span>
     </div>
     <div class="bot-hud-card">
-      <span class="bot-hud-label">Capital Actual</span>
-      <span class="bot-hud-val neon-green" id="bot-capital-now">100.00 SOL</span>
+      <span class="bot-hud-label">Capital Actual (equity paper)</span>
+      <span class="bot-hud-val neon-green" id="bot-capital-now">—</span>
     </div>
     <div class="bot-hud-card">
       <span class="bot-hud-label">PnL Forward (paper · precios reales)</span>
-      <span class="bot-hud-val neon-green" id="bot-pnl-total">+0.00 SOL ($0.00)</span>
+      <span class="bot-hud-val neon-green" id="bot-pnl-total">—</span>
     </div>
     <div class="bot-hud-card">
-      <span class="bot-hud-label">Winrate General</span>
-      <span class="bot-hud-val ok" id="bot-wr-total">0%</span>
+      <span class="bot-hud-label">Winrate General (cerradas)</span>
+      <span class="bot-hud-val ok" id="bot-wr-total">—</span>
     </div>
     <div class="bot-hud-card">
       <span class="bot-hud-label">Posiciones Abiertas</span>
-      <span class="bot-hud-val accent" id="bot-open-positions-count">0</span>
+      <span class="bot-hud-val accent" id="bot-open-positions-count">—</span>
     </div>
     <div class="bot-hud-card">
       <span class="bot-hud-label">Feed de Precios (DexScreener)</span>
       <span class="bot-hud-val" id="bot-feed-status">—</span>
     </div>
   </div>
+  <div id="bot-runtime-note" class="dim" style="font-size:10.5px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;"></div>
 
   <!-- ACTIVE POSITIONS TABLE -->
   <div style="font-weight:700; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
@@ -1341,6 +1925,113 @@
       </tbody>
     </table>
   </div>
+
+  <!-- SHADOW VETO LEDGER & AUTO-EVOLUTION LOG -->
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:10px;">
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <div style="font-weight:700; font-size:12.5px; display:flex; justify-content:space-between; align-items:center;">
+        <span>🛡️ Libro Contrafactual de Sombra ("¿Ese trade vetado hubiera ganado o perdido?")</span>
+        <button class="filter-chip" style="padding:2px 8px; font-size:10px;" onclick="triggerShadowCheck()">🔄 Verificar Precios</button>
+      </div>
+      <div class="table-box" style="max-height:210px;">
+        <table class="pro-table">
+          <thead>
+            <tr>
+              <th>Token Vetado</th>
+              <th>MC Veto -> Actual</th>
+              <th>PnL Hipotético</th>
+              <th>Veredicto Contrafactual</th>
+              <th>Motivo Veto</th>
+            </tr>
+          </thead>
+          <tbody id="bot-shadow-body">
+            <tr><td colspan="5" style="text-align:center; color:var(--dim); padding:14px;">Monitoreando tokens vetados en vivo...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <div style="font-weight:700; font-size:12.5px; display:flex; justify-content:space-between; align-items:center;">
+        <span>🧬 Auto-Mejora Post-Mortem ("Si perdí, apretar filtros automáticamente")</span>
+        <span class="shield-badge" id="bot-evo-rules-badge">—</span>
+      </div>
+      <div id="bot-decider-thresholds" class="dim" style="font-size:10px;"></div>
+      <div class="table-box" style="max-height:210px;">
+        <table class="pro-table">
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>PnL Real</th>
+              <th>Diagnóstico Causal</th>
+              <th>Filtro Auto-Ajustado</th>
+            </tr>
+          </thead>
+          <tbody id="bot-evolution-body">
+            <tr><td colspan="4" style="text-align:center; color:var(--dim); padding:14px;">Esperando cierres Paper para auto-calibrar umbrales...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- =========================================================================
+     VIEW 3.5: PIPELINE DE DECISIÓN EN VIVO (TRAZAS E0→E6 + CONSOLA SSE)
+     Consume /api/pipeline/live + /api/pipeline/trace/{mint} + /api/events (P1/P0.3)
+     ========================================================================= -->
+<main class="view-container" id="view-pipeline">
+  <div class="pipeline-funnel-wrap">
+    <div class="pipeline-title-row">
+      <span class="pipeline-title">🔬 Pipeline de Decisión Filtrada (E0 → E6)</span>
+      <span class="dim" id="pipeline-window-label" style="font-size:10.5px;">Ventana: —</span>
+    </div>
+    <div class="funnel-grid" id="pipeline-funnel">
+      <!-- Embudo agregado renderizado dinámicamente -->
+    </div>
+    <div class="funnel-bar" id="pipeline-funnel-bar" aria-hidden="true"></div>
+    <div class="filter-chips" id="pipeline-veto-stages" style="font-size:10px;"></div>
+  </div>
+
+  <div class="pipeline-grid">
+    <div class="table-box">
+      <table class="pro-table">
+        <thead>
+          <tr>
+            <th>Hora</th>
+            <th>Token</th>
+            <th>Veredicto</th>
+            <th>Etapa de Veto</th>
+            <th>Ejecutado</th>
+          </tr>
+        </thead>
+        <tbody id="pipeline-traces-body">
+          <tr><td colspan="5" style="text-align:center; color:var(--dim); padding:18px;">Cargando trazas de decisión reales...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <aside class="pipeline-detail">
+      <div style="font-weight:700; font-size:11px;" id="pipeline-detail-title">Cascada de la traza seleccionada</div>
+      <div id="pipeline-detail-stages" class="pipeline-stages">
+        <div class="dim" style="font-size:10.5px;">Selecciona una traza para inspeccionar sus etapas E0 → E6.</div>
+      </div>
+      <div style="font-weight:700; font-size:11px; margin-top:6px;">Historial del mismo mint</div>
+      <div id="pipeline-mint-history" class="dim" style="font-size:10px;">—</div>
+    </aside>
+  </div>
+
+  <section class="pipeline-console-wrap">
+    <div class="pipeline-console-head">
+      <span>🛰️ Consola de Eventos en Vivo (SSE · /api/events)</span>
+      <span style="display:flex; align-items:center; gap:8px;">
+        <span id="console-status" class="shield-badge">conectando…</span>
+        <button class="filter-chip" id="btn-console-pause" onclick="toggleConsolePause()" aria-label="Pausar o reanudar consola">⏸ Pausar</button>
+        <button class="filter-chip" onclick="clearConsole()" aria-label="Limpiar consola">🗑 Limpiar</button>
+      </span>
+    </div>
+    <div id="pipeline-console" class="pipeline-console" role="log" aria-live="polite"></div>
+  </section>
 </main>
 
 <!-- =========================================================================
@@ -1351,13 +2042,14 @@
 
   <aside id="left-panel-3d">
     <div style="font-weight:700; font-size:12px; color:var(--accent);">Auditoría de Sesgo de Lookahead</div>
-    <div style="font-size:10px; color:var(--dim);">Manifold 3D de 65,423 tokens de custom.db</div>
+    <div id="bias-note" style="font-size:10px; color:var(--dim);">Manifold 3D — cargando…</div>
     <table id="bias-table" style="font-size:10px; width:100%; margin-top:8px;">
       <thead><tr><th>Segmento</th><th>Tokens</th><th>+50%</th><th>WR</th></tr></thead>
       <tbody></tbody>
     </table>
-    <div style="margin-top:12px; font-size:10px; color:var(--dim); line-height:1.4;">
-      💡 El filtro con condición futura (<span class="warn">MC final ≥ $4,500</span>) genera una ilusión del 98%. Sin ella, la tasa cae a 20.57%.
+    <div id="bias-verdict" style="margin-top:12px; font-size:10px; color:var(--dim); line-height:1.4;">
+      💡 El filtro con condición futura (<span class="warn">MC final ≥ $4,500</span>) infla la tasa de acierto:
+      comparar ambas filas es la diferencia entre edge real y lookahead.
     </div>
   </aside>
 
@@ -1406,9 +2098,162 @@
   </div>
 </main>
 
+<!-- =========================================================================
+     VIEW 7: ANALÍTICA DE RENDIMIENTO (informe real sobre operaciones cerradas)
+     Solo lee la base canónica: no proyecta rentabilidad ni promete edge.
+     ========================================================================= -->
+<main class="view-container" id="view-analytics">
+  <div class="an-head">
+    <div class="an-title">
+      <h2>📊 Análisis de Rendimiento</h2>
+      <span class="an-sub" id="an-source">—</span>
+    </div>
+    <div class="an-periods" role="group" aria-label="Período del análisis">
+      <button class="an-period active" id="an-period-all" onclick="setPerformancePeriod('all', this)">Todo</button>
+      <button class="an-period" id="an-period-90d" onclick="setPerformancePeriod('90d', this)">90 días</button>
+      <button class="an-period" id="an-period-30d" onclick="setPerformancePeriod('30d', this)">30 días</button>
+      <button class="an-period" id="an-period-7d" onclick="setPerformancePeriod('7d', this)">7 días</button>
+    </div>
+  </div>
+
+  <div class="an-kpis" id="an-kpis">
+    <div class="an-empty" style="grid-column:1/-1;">Cargando métricas reales de la base canónica…</div>
+  </div>
+
+  <div class="an-grid">
+    <section class="an-panel">
+      <div class="an-panel-head">
+        <span class="an-panel-title">Curva de capital · drawdown</span>
+        <span class="an-panel-note" id="an-equity-note">—</span>
+      </div>
+      <div id="an-equity"></div>
+    </section>
+    <section class="an-panel">
+      <div class="an-panel-head">
+        <span class="an-panel-title">Distribución de operaciones</span>
+        <span class="an-panel-note" id="an-donut-note">—</span>
+      </div>
+      <div id="an-donut"></div>
+    </section>
+  </div>
+
+  <div class="an-grid">
+    <section class="an-panel">
+      <div class="an-panel-head">
+        <span class="an-panel-title">Histograma de PnL por operación</span>
+        <span class="an-panel-note" id="an-hist-note">—</span>
+      </div>
+      <div id="an-hist"></div>
+    </section>
+    <section class="an-panel">
+      <div class="an-panel-head">
+        <span class="an-panel-title">Desglose por motivo de salida</span>
+      </div>
+      <table class="an-table">
+        <thead><tr><th>Motivo</th><th>Ops</th><th>PnL medio</th><th>PnL USD</th></tr></thead>
+        <tbody id="an-reason-body"></tbody>
+      </table>
+    </section>
+  </div>
+</main>
+
+<!-- =========================================================================
+     VIEW 8: TOKENS & PROCESO DE SELECCIÓN
+     Cableado visible + filtrado + diagramas + memoria + validación por paper.
+     ========================================================================= -->
+<main class="view-container" id="view-tokens">
+  <div class="tk-head">
+    <div class="an-title">
+      <h2 class="tk-title">🧭 Tokens & Proceso de Selección</h2>
+      <span class="an-sub" id="tk-counts">—</span>
+    </div>
+    <button class="filter-chip" onclick="fetchWiring();fetchTokenMemory();fetchTokens();">↺ Recablear</button>
+  </div>
+
+  <!-- Estado de cada subsistema cableado (se actualiza solo) -->
+  <div class="wire-strip" id="wire-strip">
+    <div class="wire-chip warn"><span class="wire-dot warn"></span><span class="k">CABLEADO</span><span>cargando…</span></div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="tk-subbar">
+    <div class="tk-field">🔍 <input type="text" id="tk-search" placeholder="símbolo, nombre o mint" oninput="onTokenFilter('q', this.value)" /></div>
+    <div class="tk-field">MC ≥ <input type="number" id="tk-mc-min" placeholder="0" oninput="onTokenFilter('mcMin', this.value)" /></div>
+    <div class="tk-field">MC ≤ <input type="number" id="tk-mc-max" placeholder="∞" oninput="onTokenFilter('mcMax', this.value)" /></div>
+    <div class="tk-field">Liq ≥ <input type="number" id="tk-liq-min" placeholder="0" oninput="onTokenFilter('liqMin', this.value)" /></div>
+    <div class="tk-field">Vol5m ≥ <input type="number" id="tk-vol-min" placeholder="0" oninput="onTokenFilter('volMin', this.value)" /></div>
+    <div class="tk-field">Score ≥ <input type="number" id="tk-score-min" placeholder="0" oninput="onTokenFilter('scoreMin', this.value)" /></div>
+    <div class="tk-field">Orden
+      <select id="tk-sort" onchange="onTokenFilter('sort', this.value)">
+        <option value="score">Score</option>
+        <option value="mc">Market cap</option>
+        <option value="liq">Liquidez</option>
+        <option value="vol">Volumen 5m</option>
+      </select>
+    </div>
+    <div class="filter-chips">
+      <button class="filter-chip active" onclick="setTokenVerdict('ALL', this)">Todos</button>
+      <button class="filter-chip" onclick="setTokenVerdict('ADMITTED', this)">✅ No vetados</button>
+      <button class="filter-chip" onclick="setTokenVerdict('HIGH', this)">🟢 Score ≥ 80</button>
+      <button class="filter-chip" onclick="setTokenVerdict('SMART', this)">🎯 Smart money</button>
+      <button class="filter-chip" onclick="setTokenVerdict('VETO', this)">🔴 Vetados</button>
+    </div>
+  </div>
+
+  <div class="tk-grid">
+    <section class="tk-panel">
+      <div class="tk-panel-head">
+        <span class="tk-panel-title">Mapa de selección · market cap × liquidez × volumen</span>
+        <span class="tk-panel-note" id="tk-bubble-note">—</span>
+      </div>
+      <div id="tk-bubble"></div>
+    </section>
+    <section class="tk-panel">
+      <div class="tk-panel-head">
+        <span class="tk-panel-title">Embudo del proceso de selección</span>
+        <span class="tk-panel-note">en vivo</span>
+      </div>
+      <div id="tk-funnel"></div>
+      <div class="tk-panel-head" style="margin-top:4px;">
+        <span class="tk-panel-title">Cadena de decisión E0→E6</span>
+        <span class="tk-panel-note" id="tk-flow-note">—</span>
+      </div>
+      <div id="tk-flow"></div>
+    </section>
+  </div>
+
+  <div class="tk-grid">
+    <section class="tk-panel">
+      <div class="tk-panel-head">
+        <span class="tk-panel-title">Tokens tras filtro</span>
+        <span class="tk-panel-note" id="tk-table-note">—</span>
+      </div>
+      <table class="tk-table">
+        <thead><tr><th>Token</th><th>MC</th><th>Liq</th><th>Vol 5m</th><th>Score</th><th>SM</th><th>Veredicto</th><th>Motivo</th></tr></thead>
+        <tbody id="tk-table-body"></tbody>
+      </table>
+    </section>
+    <section class="tk-panel">
+      <div class="tk-panel-head">
+        <span class="tk-panel-title">Memoria de decisiones</span>
+        <span class="tk-panel-note" id="tk-memory-note">—</span>
+      </div>
+      <div class="tk-memory" id="tk-memory"></div>
+    </section>
+  </div>
+
+  <section class="tk-panel">
+    <div class="tk-panel-head">
+      <span class="tk-panel-title">Validación con paper trading (criterios de certificación)</span>
+      <span class="tk-panel-note">AGENTS.md §1.3</span>
+    </div>
+    <div id="tk-validation-body"><div class="an-empty">Sin datos de paper trading todavía.</div></div>
+  </section>
+</main>
+
 <!-- FLOATING TOOLTIP & TOAST -->
 <div id="tooltip"></div>
-<div id="toast"><span id="toast-msg">Notificación</span></div>
+<div id="toast" role="status" aria-live="polite"><span id="toast-msg">Notificación</span></div>
 
 <script>
 "use strict";
@@ -1425,6 +2270,37 @@ let botStatus = {};
 let selectedToken = null;
 let selectedOrderSizeVal = 1.0;
 let pollTimer = null;
+let pollTick = 0;
+
+// Pipeline en vivo (P1) + consola SSE (P0.3)
+let pipelineData = null;
+let selectedTrace = null;
+let consolePaused = false;
+let eventStream = null;
+let consolePrimed = false;
+
+// =========================================================================
+// LEY ANTI-FALACIA: "N/D — sin dato" (nunca inventar valores por defecto)
+// =========================================================================
+const ND = "N/D — sin dato";
+const ND_SHORT = "N/D";
+function nd(v, fmt) {
+  if (v === null || v === undefined) return ND;
+  if (typeof v === "number" && !Number.isFinite(v)) return ND;
+  return fmt ? fmt(v) : String(v);
+}
+// Escape de texto proveniente de APIs externas antes de inyectarlo en innerHTML
+function escapeHtml(s) {
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+const fmtInt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const fmtUsd2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+const fmt2 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtSolSign = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(3)} SOL`;
+const fmtPctSign1 = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+const fmtPctSign2 = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+const consoleTimeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 // =========================================================================
 // NAVIGATION SWITCHER
@@ -1442,6 +2318,18 @@ function switchMainMode(mode) {
   if (mode === "3d") {
     resize3dCanvas();
   }
+  if (mode === "pipeline") {
+    fetchPipeline();
+    ensureEventStream();
+  }
+  if (mode === "analytics") {
+    fetchPerformance();
+  }
+  if (mode === "tokens") {
+    fetchWiring();
+    fetchTokenMemory();
+    fetchTokens();
+  }
 }
 
 // =========================================================================
@@ -1452,7 +2340,11 @@ async function refreshAll() {
     fetchTokens(),
     fetchWallets(),
     fetchBotStatus(),
-    fetchAiStatus()
+    fetchAiStatus(),
+    fetchPipeline(),
+    fetchEvolutionStatus(),
+    fetchPerformance(),
+    fetchWiring()
   ]);
   showToast("Datos actualizados en tiempo real");
 }
@@ -1464,6 +2356,8 @@ async function fetchTokens() {
     if (data.ok && data.tokens) {
       rawTokens = data.tokens;
       renderTokens();
+      // La vista de Tokens comparte la misma fuente en vivo.
+      if (currentMode === "tokens") renderTokensView();
     }
   } catch (err) {
     console.error("Error fetching tokens:", err);
@@ -1500,10 +2394,15 @@ async function fetchBotStatus() {
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
-    await Promise.all([
-      fetchBotStatus(),
-      fetchTokens()
-    ]);
+    pollTick += 1;
+    const tasks = [fetchBotStatus(), fetchTokens(), fetchPipeline()];
+    if (pollTick % 4 === 0) tasks.push(fetchEvolutionStatus());
+    if (currentMode === "analytics") tasks.push(fetchPerformance());
+    if (currentMode === "tokens") {
+      tasks.push(fetchWiring());
+      if (pollTick % 4 === 0) tasks.push(fetchTokenMemory());
+    }
+    await Promise.all(tasks);
   }, 2500);
 }
 
@@ -1517,7 +2416,7 @@ function renderTokens() {
   let filtered = rawTokens.filter(t => {
     // Category filter
     if (currentCategory === "HIGH_SCORE" && t.confluence_score < 80) return false;
-    if (currentCategory === "SMART_MONEY" && t.smart_buyers_count < 1) return false;
+    if (currentCategory === "SMART_MONEY" && !(t.smart_buyers_count >= 1)) return false;
     if (currentCategory === "EXPANSION" && t.pattern.pattern_id !== "EXPANSION_BREAKOUT") return false;
     if (currentCategory === "VETO" && t.verdict !== "VETO") return false;
 
@@ -1542,7 +2441,7 @@ function renderTokens() {
   if (filtered.length === 0) {
     container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--dim);">
       No hay tokens coincidentes con los filtros seleccionados.
-      <br/><button class="filter-chip" style="margin-top:10px;" onclick="setCategoryFilter('ALL', document.querySelector('.filter-chip'))">Mostrar Todos</button>
+      <br/><button class="filter-chip" style="margin-top:10px;" onclick="setCategoryFilter('ALL', document.getElementById('chip-cat-all'))">Mostrar Todos</button>
     </div>`;
     return;
   }
@@ -1561,48 +2460,51 @@ function renderTokens() {
     card.className = `token-card ${cardCls} ${selectedToken && selectedToken.mint === t.mint ? "selected" : ""}`;
     card.onclick = () => selectTokenForInspection(t);
 
-    // Sparkline SVG generator
-    const sparkSvg = createSparklineSvg(t.sparkline || [10, 11, 10.5, 12, 13], isVeto ? "#ff3366" : "#00ffaa");
+    // Sparkline SVG generator (sin serie real => sin geometría inventada)
+    const sparkSvg = createSparklineSvg(t.sparkline || [], isVeto ? "#ff3366" : "#00ffaa");
 
     card.innerHTML = `
       <div class="card-top">
         <div class="token-identity">
-          <span class="token-symbol">${t.symbol}</span>
-          <span class="token-name">${t.name}</span>
+          <span class="token-symbol">${escapeHtml(t.symbol)}</span>
+          <span class="token-name">${escapeHtml(t.name)}</span>
           <span class="token-ca" onclick="copyText('${t.mint}', event)" title="Copiar CA">
             ${t.mint.slice(0, 4)}...${t.mint.slice(-4)} 📋
           </span>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
-          <span class="shield-badge ${t.confluence_score >= 80 ? 'safe' : ''}">Score: ${t.confluence_score}/100</span>
-          <span class="shield-badge">${t.price_change_5m >= 0 ? '+' : ''}${t.price_change_5m.toFixed(1)}%</span>
+          <span class="shield-badge ${t.confluence_score >= 80 ? 'safe' : ''}">Score: ${nd(t.confluence_score, (v) => `${v}/100`)}</span>
+          <span class="shield-badge">${nd(t.price_change_5m, (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`)}</span>
         </div>
       </div>
 
       <div class="card-metrics">
-        <div class="cm-box"><span class="cm-label">Market Cap</span><span class="cm-val">$${t.market_cap_usd.toLocaleString()}</span></div>
-        <div class="cm-box"><span class="cm-label">Liquidez</span><span class="cm-val">$${t.liquidity_usd.toLocaleString()}</span></div>
-        <div class="cm-box"><span class="cm-label">Volumen 5m</span><span class="cm-val">$${(t.volume_5m_usd || 0).toLocaleString()}</span></div>
-        <div class="cm-box"><span class="cm-label">Smart Buyers</span><span class="cm-val accent">${t.smart_buyers_count}</span></div>
+        <div class="cm-box"><span class="cm-label">Market Cap</span><span class="cm-val">${nd(t.market_cap_usd, (v) => `$${fmtInt.format(v)}`)}</span></div>
+        <div class="cm-box"><span class="cm-label">Liquidez</span><span class="cm-val">${nd(t.liquidity_usd, (v) => `$${fmtInt.format(v)}`)}</span></div>
+        <div class="cm-box"><span class="cm-label">Volumen 5m</span><span class="cm-val">${nd(t.volume_5m_usd, (v) => `$${fmtInt.format(v)}`)}</span></div>
+        <div class="cm-box"><span class="cm-label">Smart Buyers</span><span class="cm-val accent">${nd(t.smart_buyers_count, fmtInt.format)}</span></div>
       </div>
 
       <div class="sparkline-wrap">${sparkSvg}</div>
 
       <div class="pattern-banner ${bannerCls}">
-        <span>${t.pattern.label}</span>
-        <span>Conf: ${t.pattern.confidence_pct}% · EV: ${t.pattern.expected_ev}</span>
+        <span>${escapeHtml(t.pattern.label)}</span>
+        <span>Conf: ${nd(t.pattern.confidence_pct, (v) => `${v}%`)} · EV: ${escapeHtml(t.pattern.expected_ev)}</span>
       </div>
 
       <div class="causal-trigger">
-        <b>Gatillo Causal:</b> ${t.pattern.causal_trigger}
+        <b>Gatillo Causal:</b> ${escapeHtml(t.pattern.causal_trigger)}
       </div>
 
       <div class="card-footer">
         <div class="badges-row">
-          ${(t.smart_buyers_tags || []).map(tg => `<span class="smart-badge">🎯 ${tg}</span>`).join('')}
-          <span class="shield-badge ${t.rug_ratio < 0.2 ? 'safe' : 'danger'}">Rug: ${(t.rug_ratio * 100).toFixed(0)}%</span>
-          <span class="shield-badge ${t.top10_concentration_pct < 30 ? 'safe' : 'danger'}">Top10: ${t.top10_concentration_pct.toFixed(1)}%</span>
-          <span class="shield-badge ${t.dev_balance_pct < 1.5 ? 'safe' : 'danger'}">Dev: ${t.dev_balance_pct.toFixed(1)}%</span>
+          ${(t.smart_buyers_tags || []).map(tg => `<span class="smart-badge">🎯 ${escapeHtml(tg)}</span>`).join('')}
+          <span class="shield-badge ${typeof t.bundler_pct === "number" ? (t.bundler_pct < 20 ? 'safe' : 'danger') : 'warn'}">Bundler: ${nd(t.bundler_pct, (v) => `${v.toFixed(1)}%`)}</span>
+          <span class="shield-badge ${typeof t.top10_concentration_pct === "number" ? (t.top10_concentration_pct < 30 ? 'safe' : 'danger') : 'warn'}">Top10: ${nd(t.top10_concentration_pct, (v) => `${v.toFixed(1)}%`)}</span>
+          <span class="shield-badge ${typeof t.dev_balance_pct === "number" ? (t.dev_balance_pct < 1.5 ? 'safe' : 'danger') : 'warn'}">Dev: ${nd(t.dev_balance_pct, (v) => `${v.toFixed(1)}%`)}</span>
+          ${t.wash_trading_flag ? `<span class="shield-badge danger">⚠️ Wash (${nd(t.avg_tx_m5_usd, (v) => `$${v.toFixed(2)}/tx`)})</span>` : ''}
+          ${(t.same_name_count || 0) >= 3 ? `<span class="shield-badge danger">🧬 Clones: ${t.same_name_count}</span>` : ''}
+          ${t.metrics_known === false ? `<span class="shield-badge warn">⏳ Sin Auditoría Holder</span>` : ''}
         </div>
         <div class="actions-row" style="display:flex; gap:6px;">
           <button class="filter-chip" style="padding:4px 8px; border-color:var(--purple); color:var(--purple); font-size:10.5px;" onclick="auditTokenFromCard('${t.mint}', '${t.symbol}', event)">🧠 Auditar IA</button>
@@ -1646,19 +2548,31 @@ function selectTokenForInspection(t) {
   document.querySelectorAll(".token-card").forEach(c => c.classList.remove("selected"));
 
   document.getElementById("insp-token-title").textContent = `${t.symbol} — ${t.name}`;
-  document.getElementById("insp-token-ca").textContent = t.mint;
-  document.getElementById("insp-score-circle").textContent = t.confluence_score;
+  document.getElementById("insp-token-ca").textContent = `${t.mint} (${(t.chain_id || 'solana').toUpperCase()})`;
+  document.getElementById("insp-score-circle").textContent = (typeof t.confluence_score === "number") ? String(t.confluence_score) : ND_SHORT;
   document.getElementById("insp-pattern-name").textContent = t.pattern.label;
-  document.getElementById("insp-pattern-ev").textContent = `EV Esperado: ${t.pattern.expected_ev} · Confianza: ${t.pattern.confidence_pct}%`;
-  document.getElementById("insp-causal-desc").innerHTML = `<b>Diagnóstico Causal IA:</b> ${t.pattern.causal_trigger}<br/><br/>
-    <b>Microestructura de Liquidez:</b> Ratio Liq/MC: ${(t.liquidity_usd / Math.max(t.market_cap_usd, 1) * 100).toFixed(1)}% · Snipers Bloque 0: ${t.sniper_ratio_pct.toFixed(1)}%`;
+  document.getElementById("insp-pattern-ev").textContent = `EV Esperado: ${t.pattern.expected_ev} · Confianza: ${nd(t.pattern.confidence_pct, (v) => `${v}%`)}`;
+
+  const whyMoves = escapeHtml(t.why_price_moves || t.pattern.causal_trigger || "Sin diagnóstico adicional");
+  const playbook = escapeHtml(t.actionable_playbook || "Monitorear volumen orgánico y confirmar ausencia de Bundlers.");
+  document.getElementById("insp-causal-desc").innerHTML = `
+    <b>¿Por qué se mueve el precio?:</b> ${whyMoves}<br/><br/>
+    <b>Forense GMGN:</b> Bundler: <b>${nd(t.bundler_pct, (v) => `${v.toFixed(1)}%`)}</b> · Top10 Float: <b>${nd(t.top10_concentration_pct, (v) => `${v.toFixed(1)}%`)}</b> · Clones: <b>${nd(t.same_name_count, fmtInt.format)}</b> · Avg Tx 5m: <b>${nd(t.avg_tx_m5_usd, (v) => `$${v.toFixed(2)}`)}</b><br/><br/>
+    <b>Playbook Accionable:</b> <span style="color:var(--accent);">${playbook}</span>
+  `;
 
   if (t.tp_targets) {
-    document.getElementById("insp-tp1").textContent = `$${t.tp_targets.tp1_partial_50pct.toLocaleString()}`;
-    document.getElementById("insp-be").textContent = `$${t.tp_targets.breakeven_lock_25pct.toLocaleString()}`;
-    document.getElementById("insp-tp2").textContent = `$${t.tp_targets.tp2_runner_150pct.toLocaleString()}`;
+    document.getElementById("insp-tp1").textContent = nd(t.tp_targets.tp1_partial_50pct, (v) => `$${fmtInt.format(v)}`);
+    document.getElementById("insp-be").textContent = nd(t.tp_targets.breakeven_lock_25pct, (v) => `$${fmtInt.format(v)}`);
+    document.getElementById("insp-tp2").textContent = nd(t.tp_targets.tp2_runner_150pct, (v) => `$${fmtInt.format(v)}`);
+  } else {
+    ["insp-tp1", "insp-be", "insp-tp2"].forEach((elId) => {
+      const el = document.getElementById(elId);
+      if (el) el.textContent = ND_SHORT;
+    });
   }
-  document.getElementById("insp-sl").textContent = `$${t.sl_target.toLocaleString()} (-33.49%)`;
+  const slEl = document.getElementById("insp-sl");
+  if (slEl) slEl.textContent = nd(t.sl_target, (v) => `$${fmtInt.format(v)} (-33.49%)`);
 
   const btnBuy = document.getElementById("btn-insp-buy");
   if (t.verdict === "VETO") {
@@ -1674,10 +2588,122 @@ function selectTokenForInspection(t) {
   }
 }
 
+async function inspectContractFromUi() {
+  const input = document.getElementById("radar-search");
+  const mint = (input ? input.value : "").trim();
+  if (!mint || mint.length < 16) {
+    showToast("Ingresa una dirección de contrato válida (Solana mint o 0x... BSC/Base)");
+    return;
+  }
+  showToast("🔍 Ejecutando Dossier Forense GMGN (DexScreener + GoPlus + RugCheck)...");
+  try {
+    const res = await fetch("/api/dossier/inspect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mint })
+    });
+    const data = await res.json();
+    if (data.ok && data.dossier) {
+      const d = data.dossier;
+      const mcUsd = (typeof d.market_cap_usd === "number") ? d.market_cap_usd : null;
+      const mapped = {
+        mint: d.mint,
+        symbol: d.symbol || mint.slice(0, 6),
+        name: d.name || d.symbol || "Token Auditado",
+        chain_id: d.chain || "solana",
+        price_usd: null, // el dossier forense no expone precio spot
+        market_cap_usd: mcUsd,
+        liquidity_usd: (typeof d.liquidity_usd === "number") ? d.liquidity_usd : null,
+        volume_5m_usd: (typeof d.volume_m5_usd === "number") ? d.volume_m5_usd : null,
+        price_change_5m: null, // el dossier forense no expone variación 5m
+        confluence_score: (typeof d.composite_dd_score === "number") ? d.composite_dd_score : null,
+        verdict: d.verdict === "PASS" ? "AUTO_SNIPE" : d.verdict,
+        rug_ratio: d.is_honeypot ? 1.0 : Math.min(1.0, (d.bundler_pct || 0) / 100.0),
+        top10_concentration_pct: (typeof d.top10_float_pct === "number") ? d.top10_float_pct : null,
+        dev_balance_pct: (typeof d.dev_balance_pct === "number") ? d.dev_balance_pct : null,
+        sniper_ratio_pct: (typeof d.bundler_pct === "number") ? d.bundler_pct : null,
+        bundler_pct: (typeof d.bundler_pct === "number") ? d.bundler_pct : null,
+        wash_trading_flag: Boolean(d.wash_trading_flag),
+        avg_tx_m5_usd: (typeof d.avg_tx_m5_usd === "number") ? d.avg_tx_m5_usd : null,
+        same_name_count: (typeof d.same_name_count === "number") ? d.same_name_count : null,
+        why_price_moves: d.why_price_moves || "",
+        actionable_playbook: d.actionable_playbook || "",
+        metrics_known: Boolean(d.metrics_known),
+        smart_buyers_count: null, // el dossier forense no expone smart money
+        smart_buyers_tags: (Array.isArray(d.veto_reasons) ? d.veto_reasons : []).slice(0, 2),
+        pattern: {
+          pattern_id: d.kline_pattern || "AUDIT_DOSSIER",
+          label: `${d.verdict} · ${d.kline_pattern || 'DOSSIER'}`,
+          bias: d.verdict === "VETO" ? "BEARISH_VETO" : "BULLISH",
+          confidence_pct: (typeof d.composite_dd_score === "number") ? d.composite_dd_score : null,
+          expected_ev: d.verdict === "VETO" ? "-33.49% (VETO)" : "Pendiente OOS",
+          causal_trigger: d.why_price_moves || "Auditoría forense directa"
+        },
+        tp_targets: mcUsd === null ? null : {
+          tp1_partial_50pct: Math.round(mcUsd * 1.5),
+          breakeven_lock_25pct: Math.round(mcUsd * 1.25),
+          tp2_runner_150pct: Math.round(mcUsd * 2.5)
+        },
+        sl_target: mcUsd === null ? null : Math.round(mcUsd * (1 - 0.3349)),
+        sparkline: []
+      };
+      rawTokens = [mapped, ...rawTokens.filter(x => x.mint !== mapped.mint)];
+      input.value = "";
+      renderTokens();
+      selectTokenForInspection(mapped);
+      showToast(`✅ Dossier GMGN guardado: ${mapped.symbol} (Score ${nd(mapped.confluence_score, fmtInt.format)} · Bundler ${nd(mapped.bundler_pct, (v) => `${v.toFixed(1)}%`)})`);
+    } else {
+      showToast("Error en inspección: " + (data.error || "Contrato sin par activo"));
+    }
+  } catch (err) {
+    showToast("Error de red en Dossier GMGN: " + err);
+  }
+}
+
+async function submitInspectorAnnotation(decision) {
+  if (!selectedToken) {
+    showToast("Selecciona un token primero para etiquetar");
+    return;
+  }
+  try {
+    const res = await fetch("/api/annotations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mint: selectedToken.mint,
+        branch: selectedToken.pattern ? selectedToken.pattern.pattern_id : "COCKPIT_INSPECTOR",
+        admitted: decision === "BUY",
+        verdict: decision === "BUY" ? "buy" : "veto",
+        filter_name: "BUNDLER_AND_CHIP_AUDIT",
+        filter_value: (typeof selectedToken.bundler_pct === "number") ? selectedToken.bundler_pct : null,
+        threshold: 20,
+        notes: selectedToken.why_price_moves || (selectedToken.pattern && selectedToken.pattern.causal_trigger) || "Etiqueta desde Cockpit Inspector",
+        features: {
+          market_cap_usd: selectedToken.market_cap_usd,
+          liquidity_usd: selectedToken.liquidity_usd,
+          bundler_pct: selectedToken.bundler_pct,
+          top10_concentration_pct: selectedToken.top10_concentration_pct,
+          wash_trading_flag: Boolean(selectedToken.wash_trading_flag),
+          same_name_count: selectedToken.same_name_count
+        }
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const nReviews = Array.isArray(data.reviews) ? data.reviews.length : null;
+      showToast(`🏷️ Etiqueta ${decision} guardada para ${selectedToken.symbol} (#${data.signal_id}${nReviews !== null ? ` · ${nReviews} revisiones recientes` : ""})`);
+    } else {
+      showToast("Error guardando etiqueta: " + (data.error || "Desconocido"));
+    }
+  } catch (err) {
+    showToast("Error guardando etiqueta ML: " + err);
+  }
+}
+
 function setCategoryFilter(cat, btn) {
   currentCategory = cat;
   document.querySelectorAll(".radar-subbar .filter-chip").forEach(b => b.classList.remove("active"));
-  btn.classList.add("active");
+  if (btn && btn.classList) btn.classList.add("active");
   renderTokens();
 }
 
@@ -1770,15 +2796,630 @@ function filterWallets(cat, btn) {
 }
 
 // =========================================================================
+// VIEW 7: ANALÍTICA DE RENDIMIENTO (informe real, tipo TradingView)
+// Solo lectura: agrega las operaciones cerradas de la base canónica.
+// =========================================================================
+let perfData = null;
+let perfPeriod = "all";
+const perfTone = (v) =>
+  (typeof v === "number" && Number.isFinite(v)) ? (v >= 0 ? "neon-green" : "bad") : "";
+const perfDate = (t) => (typeof t === "number" && Number.isFinite(t))
+  ? new Date(t * 1000).toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "2-digit" })
+  : ND_SHORT;
+
+async function fetchPerformance() {
+  try {
+    const res = await fetch(`/api/performance?period=${perfPeriod}`);
+    const data = await res.json();
+    if (data && data.ok) {
+      perfData = data;
+      renderPerformance();
+    } else {
+      renderPerformanceEmpty(data && data.error);
+    }
+  } catch (err) {
+    console.error("Error fetching performance:", err);
+  }
+}
+
+function setPerformancePeriod(period, btn) {
+  perfPeriod = period;
+  document.querySelectorAll(".an-period").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  fetchPerformance();
+}
+
+function renderPerformanceEmpty(msg) {
+  const kpis = document.getElementById("an-kpis");
+  if (kpis) kpis.innerHTML = `<div class="an-empty" style="grid-column:1/-1;">Sin datos medibles: ${msg || "base no disponible"}</div>`;
+  ["an-equity", "an-donut", "an-hist"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = `<div class="an-empty">—</div>`;
+  });
+  const body = document.getElementById("an-reason-body");
+  if (body) body.innerHTML = `<tr><td colspan="4" class="an-empty" style="border:0;">—</td></tr>`;
+}
+
+function renderPerformance() {
+  if (!perfData || !perfData.ok) return;
+  const d = perfData;
+  const src = document.getElementById("an-source");
+  if (src) src.textContent =
+    `${d.n_trades} operaciones cerradas · ${d.source ? d.source.db : "db"} · solo lectura`;
+
+  const eq = d.equity || {};
+  const ddTxt = (eq.max_drawdown_pct === null || eq.max_drawdown_pct === undefined)
+    ? ND : `${fmt2.format(eq.max_drawdown_pct)}%`;
+  const kpis = [
+    { label: "PnL neto realizado", value: nd(d.net_pnl_usd, v => fmtUsd2.format(v)), cls: perfTone(d.net_pnl_usd) },
+    { label: "Retorno realizado", value: nd(d.return_pct, fmtPctSign2), cls: perfTone(d.return_pct) },
+    { label: "Win rate (medido)", value: nd(d.win_rate_pct, v => `${fmt2.format(v)}%`), cls: "",
+      foot: `${d.wins} gan. · ${d.losses} perd. · ${d.breakeven} neutras` },
+    { label: "Profit factor", value: nd(d.profit_factor, v => fmt2.format(v)), cls: "" },
+    { label: "Expectativa / operación", value: nd(d.expectancy_pct, fmtPctSign2), cls: perfTone(d.expectancy_pct),
+      foot: nd(d.expectancy_usd, v => `${fmtUsd2.format(v)}/op`) },
+    { label: "Ganancia media", value: nd(d.avg_win_pct, fmtPctSign2), cls: "ok" },
+    { label: "Pérdida media", value: nd(d.avg_loss_pct, fmtPctSign2), cls: "bad" },
+    { label: "Drawdown máx.", value: ddTxt, cls: "warn",
+      foot: (eq.max_drawdown === null || eq.max_drawdown === undefined) ? ""
+        : (eq.unit === "usd" ? fmtUsd2.format(eq.max_drawdown) : `${fmt2.format(eq.max_drawdown)}%`) },
+  ];
+  document.getElementById("an-kpis").innerHTML = kpis.map(k =>
+    `<div class="an-kpi"><span class="an-kpi-label">${k.label}</span>`
+    + `<span class="an-kpi-val ${k.cls || ""}">${k.value}</span>`
+    + (k.foot ? `<span class="an-kpi-foot">${k.foot}</span>` : "")
+    + `</div>`).join("");
+
+  renderEquityChart(d);
+  renderDonut(d);
+  renderHistogram(d);
+  renderReasonTable(d);
+  // La validación por paper (vista de Tokens) depende de estas métricas.
+  renderValidation();
+}
+
+function renderEquityChart(d) {
+  const host = document.getElementById("an-equity");
+  const note = document.getElementById("an-equity-note");
+  const eq = d.equity || {};
+  const pts = Array.isArray(eq.points) ? eq.points : [];
+  if (pts.length < 2) {
+    host.innerHTML = `<div class="an-empty">La curva de capital empezará a registrarse cuando haya operaciones cerradas en el período.</div>`;
+    if (note) note.textContent = "";
+    return;
+  }
+  const isUsd = eq.unit === "usd";
+  const fmtV = isUsd ? (v => fmtUsd2.format(v)) : (v => `${fmt2.format(v)}%`);
+  const W = 820, H = 200, PAD = { l: 6, r: 6, t: 10, b: 16 };
+  const vals = pts.map(p => Number(p.value));
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = Math.max(1e-9, max - min);
+  const pw = W - PAD.l - PAD.r, ph = H - PAD.t - PAD.b;
+  const X = i => PAD.l + (i / (pts.length - 1)) * pw;
+  const Y = v => PAD.t + (max - v) / range * ph;
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(Number(p.value)).toFixed(1)}`).join(" ");
+  const area = `${line} L${X(pts.length - 1).toFixed(1)},${(H - PAD.b).toFixed(1)} L${X(0).toFixed(1)},${(H - PAD.b).toFixed(1)} Z`;
+  const stroke = vals[vals.length - 1] >= vals[0] ? "var(--neon-green)" : "var(--bad)";
+  const baseY = Y(typeof eq.initial === "number" ? eq.initial : vals[0]).toFixed(1);
+
+  let peak = -Infinity;
+  const dds = vals.map(v => {
+    peak = Math.max(peak, v);
+    return peak > 0 ? ((peak - v) / peak) * 100 : 0;
+  });
+  const ddMax = Math.max(0, ...dds);
+  const DDH = 62, DDB = 8;
+  const YD = dd => DDH - DDB - (ddMax > 0 ? dd / ddMax : 0) * (DDH - DDB - 6);
+  const ddLine = dds.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${YD(v).toFixed(1)}`).join(" ");
+  const ddArea = `${ddLine} L${X(dds.length - 1).toFixed(1)},${DDH - DDB} L${X(0).toFixed(1)},${DDH - DDB} Z`;
+
+  host.innerHTML = `
+    <div class="an-chart-wrap">
+      <svg class="an-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+           aria-label="Curva de capital con ${pts.length} puntos, de ${fmtV(min)} a ${fmtV(max)}">
+        <defs>
+          <linearGradient id="anEqFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${stroke}" stop-opacity="0.28"/>
+            <stop offset="100%" stop-color="${stroke}" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <line x1="${PAD.l}" x2="${W - PAD.r}" y1="${baseY}" y2="${baseY}"
+              stroke="#243149" stroke-width="1" stroke-dasharray="4 4"/>
+        <path d="${area}" fill="url(#anEqFill)"/>
+        <path d="${line}" fill="none" stroke="${stroke}" stroke-width="1.8"/>
+      </svg>
+      <div class="an-chart-axis"><span>${fmtV(min)}</span><span>${fmtV(max)}</span></div>
+    </div>
+    <div class="an-chart-wrap" style="margin-top:8px;">
+      <svg class="an-svg" viewBox="0 0 ${W} ${DDH}" preserveAspectRatio="none" role="img"
+           aria-label="Serie de drawdown, máximo ${fmt2.format(ddMax)} por ciento">
+        <defs>
+          <linearGradient id="anDdFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--bad)" stop-opacity="0.32"/>
+            <stop offset="100%" stop-color="var(--bad)" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <path d="${ddArea}" fill="url(#anDdFill)"/>
+        <path d="${ddLine}" fill="none" stroke="var(--bad)" stroke-width="1.3"/>
+      </svg>
+      <div class="an-chart-axis">
+        <span>Drawdown máx. ${fmt2.format(ddMax)}%</span>
+        <span>${perfDate(pts[0].t)} → ${perfDate(pts[pts.length - 1].t)}</span>
+      </div>
+    </div>`;
+  if (note) note.textContent = isUsd ? `Equity base ${fmtUsd2.format(eq.initial)}` : "Acumulado en %";
+}
+
+function renderDonut(d) {
+  const host = document.getElementById("an-donut");
+  const note = document.getElementById("an-donut-note");
+  const total = Number(d.n_trades) || 0;
+  if (!total) {
+    host.innerHTML = `<div class="an-empty">Aún no hay operaciones cerradas en este período.</div>`;
+    if (note) note.textContent = "";
+    return;
+  }
+  const aWin = (d.wins / total) * 360;
+  const aLoss = aWin + (d.losses / total) * 360;
+  const grad = `conic-gradient(var(--neon-green) 0deg ${aWin.toFixed(2)}deg, var(--bad) ${aWin.toFixed(2)}deg ${aLoss.toFixed(2)}deg, #5b6b80 ${aLoss.toFixed(2)}deg 360deg)`;
+  host.innerHTML = `<div class="an-donut-row">
+      <div class="an-donut" style="background:${grad}" role="img"
+           aria-label="${d.wins} ganadoras, ${d.losses} perdedoras, ${d.breakeven} sin cambio">
+        <div class="an-donut-hole"><b>${total}</b><span>trades</span></div>
+      </div>
+      <ul class="an-legend">
+        <li><i class="lg-win"></i>Ganadoras <b>${d.wins}</b></li>
+        <li><i class="lg-loss"></i>Perdedoras <b>${d.losses}</b></li>
+        <li><i class="lg-flat"></i>Sin cambio <b>${d.breakeven}</b></li>
+        <li style="border-top:1px solid var(--border); padding-top:7px; margin-top:2px;">
+          Expectativa <b class="${perfTone(d.expectancy_pct)}">${nd(d.expectancy_pct, fmtPctSign2)}</b>
+        </li>
+      </ul>
+    </div>`;
+  if (note) note.textContent = `${nd(d.win_rate_pct, v => `${fmt2.format(v)}%`)} win rate`;
+}
+
+function renderHistogram(d) {
+  const host = document.getElementById("an-hist");
+  const note = document.getElementById("an-hist-note");
+  const bins = Array.isArray(d.histogram) ? d.histogram : [];
+  if (!bins.length) {
+    host.innerHTML = `<div class="an-empty">Sin operaciones para distribuir.</div>`;
+    if (note) note.textContent = "";
+    return;
+  }
+  const maxC = Math.max(1, ...bins.map(b => b.count));
+  host.innerHTML = `<div class="an-hist">` + bins.map(b => {
+    const cls = b.from >= 0 ? "win" : "loss";
+    const h = Math.max(3, (b.count / maxC) * 100);
+    return `<div class="an-hist-col" title="${fmtPctSign2(b.from)} a ${fmtPctSign2(b.to)}: ${b.count} ops">`
+      + `<span class="an-hist-count">${b.count || ""}</span>`
+      + `<i class="an-hist-bar ${cls}" style="height:${h.toFixed(1)}%"></i></div>`;
+  }).join("") + `</div>`
+    + `<div class="an-chart-axis"><span>${fmtPctSign1(bins[0].from)}</span>`
+    + `<span>PnL por operación</span><span>${fmtPctSign1(bins[bins.length - 1].to)}</span></div>`;
+  if (note) note.textContent = `${d.n_trades} operaciones`;
+}
+
+function renderReasonTable(d) {
+  const body = document.getElementById("an-reason-body");
+  const rows = Array.isArray(d.by_reason) ? d.by_reason : [];
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="4" class="an-empty" style="border:0;">Sin datos</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(r =>
+    `<tr><td>${r.reason}</td><td>${fmtInt.format(r.count)}</td>`
+    + `<td class="${perfTone(r.avg_pnl_pct)}">${nd(r.avg_pnl_pct, fmtPctSign2)}</td>`
+    + `<td class="${perfTone(r.total_pnl_usd)}">${nd(r.total_pnl_usd, v => fmtUsd2.format(v))}</td></tr>`
+  ).join("");
+}
+
+// =========================================================================
+// VIEW 8: TOKENS & PROCESO DE SELECCIÓN
+// Cableado (wiring), filtrado, mapa de burbujas, embudo, flujo E0→E6 y memoria.
+// Todo se alimenta de datos REALES: /api/wiring, /api/gmgn/tokens, /api/pipeline/*.
+// =========================================================================
+let wiringData = null;
+let tokenMemory = null;
+let tkSelected = null;
+let tkTrace = null;
+let tkFilter = { q: "", verdict: "ALL", mcMin: "", mcMax: "", liqMin: "", volMin: "", scoreMin: "", sort: "score" };
+
+const STAGE_LABELS = {
+  E0_discovery: "E0 · Descubrimiento en vivo",
+  E1_metrics_known: "E1 · Métricas on-chain verificadas",
+  E3_bundler: "E3 · Bundler (bloque 0)",
+  E3_clone_factory: "E3 · Fábrica de clones",
+  E3_dev_factory: "E3 · Fábrica del dev",
+  E3_dev_holding: "E3 · Dev holding",
+  E3_cabal_top10: "E3 · Cabal top-10",
+  E3_wash_trading: "E3 · Wash trading",
+  E3_liquidity_ratio: "E3 · Ratio liquidez/MC",
+  E4_ev_net: "E4 · EV neto",
+  E4_ml_probability: "E4 · Probabilidad ML",
+  E5_verdict: "E5 · Veredicto",
+  E6_execution: "E6 · Ejecución paper",
+};
+
+async function fetchWiring() {
+  try {
+    const res = await fetch("/api/wiring");
+    const data = await res.json();
+    if (data && data.ok) {
+      wiringData = data;
+      renderWiring();
+    }
+  } catch (err) {
+    console.error("Error fetching wiring:", err);
+  }
+}
+
+function wireChip(label, value, state, title) {
+  return `<div class="wire-chip ${state}" title="${(title || "").replace(/"/g, "'")}">`
+    + `<span class="wire-dot ${state}"></span><span class="k">${label}</span><span>${value}</span></div>`;
+}
+
+function renderWiring() {
+  const host = document.getElementById("wire-strip");
+  if (!host || !wiringData) return;
+  const w = wiringData;
+  const db = w.database || {};
+  const snap = w.snapshot || {};
+  const feed = w.feed || {};
+  const loop = w.loop || {};
+  const cyc = w.cycle || {};
+  const paper = w.paper || {};
+  const ml = w.ml || {};
+  const missing = db.missing_token_columns || [];
+  const baseName = (db.path || "").split(/[\\/]/).pop();
+  const stageAges = Object.entries(loop.stages || {})
+    .map(([k, v]) => `${k}=${(v === null || v === undefined) ? ND_SHORT : v + "s"}`).join(" · ");
+  const chips = [
+    wireChip("BASE", db.exists ? baseName : ND_SHORT,
+      db.exists ? (missing.length ? "warn" : "on") : "off",
+      `${db.path || "?"}\nresuelta por: ${db.resolved_from || "?"}\nsolo lectura\n`
+      + (missing.length ? `faltan columnas: ${missing.join(", ")} (esas métricas salen como no medible)` : "esquema completo")),
+    wireChip("SNAPSHOT", snap.state || ND_SHORT,
+      snap.state === "fresh" ? "on" : ((snap.state === "corrupt" || snap.state === "failed") ? "off" : "warn"),
+      `ok=${snap.ok} · edad=${(snap.age_s === null || snap.age_s === undefined) ? ND_SHORT : snap.age_s + "s"} · se auto-repara al pasar ${snap.max_age_s}s`),
+    wireChip("FEED", feed.source || "sin feed",
+      feed.source ? (Number(feed.errors) > 0 ? "warn" : "on") : "off",
+      `llamadas=${feed.calls ?? ND_SHORT} · misses=${feed.misses ?? ND_SHORT} · errores=${feed.errors ?? ND_SHORT}`
+      + (feed.last_error ? `\núltimo error: ${feed.last_error}` : "")),
+    wireChip("LOOP", loop.alive ? "activo" : "caído", loop.alive ? "on" : "off",
+      `edades de etapa: ${stageAges || ND_SHORT}`),
+    wireChip("CICLO", cyc.alive ? "activo" : "caído", cyc.alive ? "on" : "off",
+      cyc.last
+        ? `pasada ${cyc.last.pass} · ${cyc.last.n_candidates} candidatos · ${cyc.last.n_promoted} promovidos\n${cyc.last.verdict || ""}\ncada ${Math.round((cyc.interval_s || 0) / 60)} min`
+        : "sin pasadas todavía"),
+    wireChip("PAPER", paper.auto_bot_enabled ? "activo" : "pausado",
+      paper.auto_bot_enabled ? "on" : "warn",
+      `abiertas=${paper.open_count ?? ND_SHORT} · cerradas=${paper.closed_count ?? ND_SHORT} · WR=${paper.winrate_pct ?? ND_SHORT}%`),
+    wireChip("ML", ml.status || ND_SHORT, ml.status ? "on" : "warn",
+      `proveedor ${ml.provider || ND_SHORT} · train=${ml.train_samples ?? ND_SHORT} · test=${ml.test_samples ?? ND_SHORT}`
+      + `\nAUC=${ml.test_roc_auc ?? ND_SHORT} (fracción 0..1) · ${ml.split_mode || ""}`),
+  ];
+  host.innerHTML = chips.join("");
+  renderValidation();
+}
+
+// ── Validación con paper trading: gate honesto, sin promesas ────────────
+function renderValidation() {
+  const host = document.getElementById("tk-validation-body");
+  if (!host) return;
+  const d = perfData;
+  if (!d || !d.ok) {
+    host.innerHTML = `<div class="an-empty">Sin datos medibles de paper trading todavía.</div>`;
+    return;
+  }
+  const nOk = Number(d.n_trades) >= 100;
+  const evOk = typeof d.expectancy_pct === "number" && d.expectancy_pct > 0;
+  const pfOk = typeof d.profit_factor === "number" && d.profit_factor > 1.25;
+  const items = [
+    { k: "Muestra cerrada (N ≥ 100)", v: `${d.n_trades}`, ok: nOk },
+    { k: "EV por operación > 0%", v: d.expectancy_pct === null ? ND_SHORT : fmtPctSign2(d.expectancy_pct), ok: evOk },
+    { k: "Profit factor > 1.25", v: d.profit_factor === null ? ND_SHORT : fmt2.format(d.profit_factor), ok: pfOk },
+  ];
+  const pass = nOk && evOk && pfOk;
+  const faltan = items.filter(i => !i.ok).map(i => i.k);
+  host.innerHTML = `<div class="tk-gate">` + items.map(i =>
+    `<div class="tk-gate-item"><span class="k">${i.k}</span>`
+    + `<span class="v ${i.ok ? "neon-green" : "bad"}">${i.v}</span></div>`).join("")
+    + `</div><div class="tk-gate-verdict ${pass ? "neon-green" : "warn"}">`
+    + (pass
+      ? "✅ Criterios de certificación cumplidos SOBRE ESTA BASE de paper-forward. Por sí solo no habilita fondos reales (AGENTS.md §1.3)."
+      : `⛔ AÚN NO VALIDADA: falta ${faltan.join(" · ")}. El sistema no debe reportar edge ni habilitar live.`)
+    + `</div>`;
+}
+
+// ── Memoria: decisiones pasadas (ventana larga) ──────────────────────────
+async function fetchTokenMemory() {
+  try {
+    const res = await fetch("/api/pipeline/live?limit=60&window_s=604800");
+    const data = await res.json();
+    if (data && data.ok) {
+      tokenMemory = data;
+      renderMemory();
+    }
+  } catch (err) {
+    console.error("Error fetching token memory:", err);
+  }
+}
+
+function tsShort(ts) {
+  if (typeof ts !== "number" || !isFinite(ts)) return ND_SHORT;
+  return new Date(ts * 1000).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function renderMemory() {
+  const host = document.getElementById("tk-memory");
+  const note = document.getElementById("tk-memory-note");
+  if (!host) return;
+  const traces = (tokenMemory && tokenMemory.traces) || [];
+  if (note) {
+    const winS = tokenMemory && typeof tokenMemory.window_s === "number" ? tokenMemory.window_s : null;
+    note.textContent = winS === null ? ND_SHORT : `ventana ${(winS / 3600).toFixed(0)} h · ${traces.length} trazas`;
+  }
+  if (!traces.length) {
+    host.innerHTML = `<div class="an-empty">Sin decisiones registradas en la ventana. El loop autónomo las irá escribiendo.</div>`;
+    return;
+  }
+  host.innerHTML = traces.map(t => {
+    const v = t.verdict || "?";
+    const cls = v === "VETO" ? "bad" : (v === "ADMITTED" ? "neon-green" : "warn");
+    const why = v === "VETO" ? (t.veto_stage || "veto forense")
+      : (t.executed ? "paper abierto" : (v === "NEUTRAL" ? "EV neto no positivo" : "admitido"));
+    return `<div class="tk-mem-row" onclick="selectTokenForFlow('${t.mint || ""}')" title="${t.mint || ""}">`
+      + `<span class="tk-mem-ts">${tsShort(t.ts)}</span>`
+      + `<span class="tk-mem-sym">${t.symbol || (t.mint || "").slice(0, 6)}</span>`
+      + `<span class="tk-mem-verdict ${cls}">${v}</span>`
+      + `<span class="tk-mem-why">${why}</span></div>`;
+  }).join("");
+}
+
+// ── Filtros ─────────────────────────────────────────────────────────────
+function onTokenFilter(key, value) {
+  tkFilter[key] = value;
+  renderTokensView();
+}
+
+function setTokenVerdict(verdict, btn) {
+  tkFilter.verdict = verdict;
+  document.querySelectorAll("#view-tokens .filter-chip").forEach(b => {
+    if (b.textContent && b.textContent.trim() !== "↺ Recablear") b.classList.remove("active");
+  });
+  if (btn) btn.classList.add("active");
+  renderTokensView();
+}
+
+function tokenRowsFiltered() {
+  const f = tkFilter;
+  const q = (f.q || "").toLowerCase().trim();
+  const num = (v) => (typeof v === "number" && isFinite(v)) ? v : null;
+  return (rawTokens || []).filter(t => {
+    if (f.verdict === "ADMITTED" && t.verdict === "VETO") return false;
+    if (f.verdict === "VETO" && t.verdict !== "VETO") return false;
+    if (f.verdict === "SMART" && !(t.smart_buyers_count >= 1)) return false;
+    if (f.verdict === "HIGH" && !(t.confluence_score >= 80)) return false;
+    if (q) {
+      const hay = `${t.symbol || ""} ${t.name || ""} ${t.mint || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    const mc = num(t.market_cap_usd), liq = num(t.liquidity_usd), vol = num(t.volume_5m_usd);
+    if (f.mcMin !== "" && mc !== null && mc < Number(f.mcMin)) return false;
+    if (f.mcMax !== "" && mc !== null && mc > Number(f.mcMax)) return false;
+    if (f.liqMin !== "" && liq !== null && liq < Number(f.liqMin)) return false;
+    if (f.volMin !== "" && vol !== null && vol < Number(f.volMin)) return false;
+    if (f.scoreMin !== "" && !(t.confluence_score >= Number(f.scoreMin))) return false;
+    return true;
+  }).sort((a, b) => {
+    if (f.sort === "mc") return (b.market_cap_usd || 0) - (a.market_cap_usd || 0);
+    if (f.sort === "liq") return (b.liquidity_usd || 0) - (a.liquidity_usd || 0);
+    if (f.sort === "vol") return (b.volume_5m_usd || 0) - (a.volume_5m_usd || 0);
+    return (b.confluence_score || 0) - (a.confluence_score || 0);
+  });
+}
+
+// ── Mapa de burbujas: MC × liquidez, radio = volumen 5m, color = veredicto ──
+function renderTokenMap(rows) {
+  const host = document.getElementById("tk-bubble");
+  const note = document.getElementById("tk-bubble-note");
+  if (!host) return;
+  const pts = rows.filter(t => t.market_cap_usd > 0 && t.liquidity_usd > 0);
+  if (note) note.textContent = `${pts.length} de ${rows.length} con MC y liquidez medidos`;
+  if (pts.length < 2) {
+    host.innerHTML = `<div class="an-empty">Se necesitan al menos 2 tokens con market cap y liquidez medidos para dibujar el mapa.</div>`;
+    return;
+  }
+  // Geometría: se reserva margen izquierdo/inferior para las etiquetas de eje
+  // (antes el eje y las leyendas se pisaban) y se dibuja rejilla con ticks.
+  const W = 760, H = 320, ML = 62, MR = 16, MT = 16, MB = 34;
+  const lg = v => Math.log10(Math.max(1, v));
+  const xs = pts.map(t => lg(t.market_cap_usd));
+  const ys = pts.map(t => lg(t.liquidity_usd));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const pw = W - ML - MR, ph = H - MT - MB;
+  const sx = v => ML + (x1 > x0 ? (lg(v) - x0) / (x1 - x0) : 0.5) * pw;
+  const sy = v => H - MB - (y1 > y0 ? (lg(v) - y0) / (y1 - y0) : 0.5) * ph;
+  const vmax = Math.max(1, ...pts.map(t => t.volume_5m_usd || 0));
+  const R = v => 4 + Math.sqrt((v || 0) / vmax) * 15;
+  const color = t => t.verdict === "VETO" ? "var(--bad)" : (t.admitted ? "var(--neon-green)" : "var(--warn)");
+  const shortUsd = v => v >= 1e6 ? "$" + (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? "$" + Math.round(v / 1e3) + "k" : "$" + Math.round(v);
+  // Ticks: valores redondos dentro del rango medido (máx. 5 por eje).
+  const ticks = (lo, hi) => {
+    if (!(hi > lo)) return [lo];
+    const step = Math.pow(10, Math.floor(Math.log10(hi - lo)));
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(v);
+    return out.length > 5 ? out.filter((_, i) => i % Math.ceil(out.length / 5) === 0) : out;
+  };
+  const gridX = ticks(x0, x1).map(v =>
+    `<line x1="${sx(Math.pow(10, v)).toFixed(1)}" x2="${sx(Math.pow(10, v)).toFixed(1)}" y1="${MT}" y2="${H - MB}" stroke="#1b2437" stroke-dasharray="2 4"/>`).join("");
+  const gridY = ticks(y0, y1).map(v =>
+    `<line x1="${ML}" x2="${W - MR}" y1="${sy(Math.pow(10, v)).toFixed(1)}" y2="${sy(Math.pow(10, v)).toFixed(1)}" stroke="#1b2437" stroke-dasharray="2 4"/>`).join("");
+  const labX = ticks(x0, x1).map(v =>
+    `<text x="${sx(Math.pow(10, v)).toFixed(1)}" y="${H - MB + 14}" fill="#5b6b86" font-size="9" text-anchor="middle">${shortUsd(Math.pow(10, v))}</text>`).join("");
+  const labY = ticks(y0, y1).map(v =>
+    `<text x="${ML - 6}" y="${(sy(Math.pow(10, v)) + 3).toFixed(1)}" fill="#5b6b86" font-size="9" text-anchor="end">${shortUsd(Math.pow(10, v))}</text>`).join("");
+  const dots = pts.map(t => {
+    const c = color(t);
+    const tip = `${t.symbol || "?"} · MC $${fmtInt.format(t.market_cap_usd)} · Liq $${fmtInt.format(t.liquidity_usd)}`
+      + ` · Vol5m $${fmtInt.format(t.volume_5m_usd || 0)} · ${t.verdict || "?"} · score ${fmt2.format(t.confluence_score || 0)}`;
+    return `<circle cx="${sx(t.market_cap_usd).toFixed(1)}" cy="${sy(t.liquidity_usd).toFixed(1)}" r="${R(t.volume_5m_usd).toFixed(1)}"`
+      + ` fill="${c}" fill-opacity="0.5" stroke="${c}" stroke-width="1.2"><title>${tip}</title></circle>`;
+  }).join("");
+  host.innerHTML = `<svg class="tk-bubble" viewBox="0 0 ${W} ${H}" role="img"`
+    + ` aria-label="Mapa de ${pts.length} tokens: market cap vs liquidez, radio por volumen de 5 minutos">`
+    + gridX + gridY + labX + labY
+    + `<line x1="${ML}" x2="${ML}" y1="${MT}" y2="${H - MB}" stroke="#243149"/>`
+    + `<line x1="${ML}" x2="${W - MR}" y1="${H - MB}" y2="${H - MB}" stroke="#243149"/>`
+    + dots
+    + `<text x="${ML + pw / 2}" y="${H - 4}" fill="#5b6b86" font-size="9.5" text-anchor="middle">market cap (log)</text>`
+    + `<text x="12" y="${MT + ph / 2}" fill="#5b6b86" font-size="9.5" text-anchor="middle" transform="rotate(-90 12 ${MT + ph / 2})">liquidez (log)</text>`
+    + `</svg>`
+    + `<div class="an-chart-axis"><span>radio = volumen 5m</span>`
+    + `<span>${pts.length} tokens medidos · eje X market cap · eje Y liquidez</span>`
+    + `<span>rojo = vetado · verde = admitido · ámbar = neutral</span></div>`;
+}
+
+// ── Embudo del proceso de selección ─────────────────────────────────────
+function renderSelectionFunnel(rows) {
+  const host = document.getElementById("tk-funnel");
+  if (!host) return;
+  const total = rows.length;
+  const withMetrics = rows.filter(t => t.metrics_known !== false).length;
+  const noVeto = rows.filter(t => t.verdict !== "VETO").length;
+  const admitted = rows.filter(t => t.admitted).length;
+  const base = Math.max(1, total);
+  const stages = [
+    { lbl: "Descubiertos (feed en vivo)", v: total, fail: false },
+    { lbl: "Métricas on-chain verificadas", v: withMetrics, fail: false },
+    { lbl: "Sin veto forense", v: noVeto, fail: false },
+    { lbl: "Admitidos por el decisor", v: admitted, fail: admitted === 0 },
+    { lbl: "Vetados (fail-closed)", v: total - noVeto, fail: true },
+  ];
+  host.innerHTML = `<div class="tk-funnel">` + stages.map(s =>
+    `<div class="tk-stage"><span class="tk-stage-lbl">${s.lbl}</span>`
+    + `<span class="tk-stage-bar"><span class="tk-stage-fill${s.fail ? " fail" : ""}"`
+    + ` style="width:${(s.v / base * 100).toFixed(1)}%"></span></span>`
+    + `<span class="tk-stage-val">${s.v}</span></div>`).join("") + `</div>`;
+}
+
+// ── Cadena de decisión E0→E6 del token seleccionado ─────────────────────
+async function selectTokenForFlow(mint) {
+  tkSelected = mint;
+  tkTrace = null;
+  const host = document.getElementById("tk-flow");
+  if (host) host.innerHTML = `<div class="an-empty">Cargando traza E0→E6…</div>`;
+  document.querySelectorAll("#tk-table-body tr").forEach(tr => tr.classList.remove("sel"));
+  try {
+    const res = await fetch(`/api/pipeline/trace/${encodeURIComponent(mint)}`);
+    const data = await res.json();
+    const traces = (data && data.traces) || [];
+    tkTrace = traces.length ? traces[0] : null;
+  } catch (err) {
+    console.error("Error fetching trace:", err);
+  }
+  renderFlow();
+  renderTokenTable(tokenRowsFiltered());
+}
+
+function renderFlow() {
+  const host = document.getElementById("tk-flow");
+  const note = document.getElementById("tk-flow-note");
+  if (!host) return;
+  if (!tkTrace) {
+    host.innerHTML = `<div class="an-empty">Selecciona un token (tabla o memoria) para ver su cadena de decisión.</div>`;
+    if (note) note.textContent = ND_SHORT;
+    return;
+  }
+  const stages = tkTrace.stages || [];
+  if (note) {
+    note.textContent = `${tkTrace.symbol || (tkTrace.mint || "").slice(0, 8)} · ${tkTrace.verdict || "?"}`
+      + (tkTrace.veto_stage ? ` · veta en ${tkTrace.veto_stage}` : "");
+  }
+  host.innerHTML = `<div class="tk-flow">` + stages.map(s => {
+    const v = s.verdict || "";
+    const cls = v === "fail" ? "fail" : (v === "pass" ? "pass" : (v === "skip" ? "skip" : "info"));
+    const label = STAGE_LABELS[s.stage] || s.stage;
+    const detail = s.reason ? String(s.reason) : "";
+    return `<div class="tk-step ${cls}" title="${detail.replace(/"/g, "'")}">`
+      + `<span class="tk-step-dot"></span><span class="tk-step-name">${label}</span>`
+      + `<span class="tk-step-verdict">${v}${detail ? " · " + detail.slice(0, 54) : ""}</span></div>`;
+  }).join("") + `</div>`;
+}
+
+// ── Tabla de tokens filtrados ───────────────────────────────────────────
+function renderTokenTable(rows) {
+  const body = document.getElementById("tk-table-body");
+  const note = document.getElementById("tk-table-note");
+  if (note) note.textContent = `${rows.length} de ${(rawTokens || []).length}`;
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="8" class="an-empty" style="border:0;">Ningún token cumple los filtros activos.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(t => {
+    const sel = t.mint === tkSelected ? " class=\"sel\"" : "";
+    const badge = t.verdict === "VETO" ? `<span class="bad">🚫 VETO</span>`
+      : (t.admitted ? `<span class="neon-green">✅ ADMITIDO</span>`
+        : `<span class="warn">🟡 ${t.verdict || "?"}</span>`);
+    return `<tr${sel} onclick="selectTokenForFlow('${t.mint}')">`
+      + `<td><b>${t.symbol || "?"}</b></td>`
+      + `<td>${nd(t.market_cap_usd, fmtUsd2.format)}</td>`
+      + `<td>${nd(t.liquidity_usd, fmtUsd2.format)}</td>`
+      + `<td>${nd(t.volume_5m_usd, fmtUsd2.format)}</td>`
+      + `<td>${nd(t.confluence_score, v => fmt2.format(v))}</td>`
+      + `<td>${t.smart_buyers_count || 0}</td>`
+      + `<td>${badge}</td>`
+      + `<td style="font-size:10px; color:var(--dim);">${String(t.veto_reason || "").slice(0, 44)}</td></tr>`;
+  }).join("");
+}
+
+function renderTokensView() {
+  const rows = tokenRowsFiltered();
+  const counts = document.getElementById("tk-counts");
+  if (counts) {
+    counts.textContent = `${rows.length} de ${(rawTokens || []).length} tokens · `
+      + `${(rawTokens || []).filter(t => t.verdict !== "VETO").length} sin veto · `
+      + `${(rawTokens || []).filter(t => t.admitted).length} admitidos`;
+  }
+  renderSelectionFunnel(rows);
+  renderTokenMap(rows);
+  renderTokenTable(rows);
+  renderMemory();
+  renderValidation();
+}
+
+// =========================================================================
 // RENDER VIEW 3: BOT AUTO-TRADER & POSICIONES PAPER
 // =========================================================================
 function renderBotStatus() {
   if (!botStatus) return;
 
-  // Header pills
-  document.getElementById("top-wr").textContent = `${botStatus.winrate_pct ?? 0}%`;
-  document.getElementById("top-pnl").textContent = `${(botStatus.total_pnl_sol ?? 0) >= 0 ? '+' : ''}${botStatus.total_pnl_sol ?? 0} SOL`;
-  document.getElementById("top-open-count").textContent = botStatus.open_count ?? 0;
+  // Contrato: la UI web lee EXCLUSIVAMENTE el bloque `dashboard` (mismo candado que el exe C#).
+  const dash = botStatus.dashboard || {};
+  const pw = dash.paper_wallet || {};
+  const rt = dash.runtime || {};
+  const evo = dash.evolution || {};
+  const mk = dash.metrics_known || {};
+  const evoRoot = botStatus.evolution || {}; // detalle incremental del store (solo lectura)
+
+  // Header pills (ley anti-falacia: sin dato => "N/D — sin dato")
+  const solEl = document.getElementById("top-sol");
+  if (solEl) {
+    solEl.textContent = nd(pw.sol_price_usd, (v) =>
+      `${fmtUsd2.format(v)} (${pw.sol_price_source === "live" ? "live" : "asunción declarada"})`);
+    solEl.title = pw.sol_price_source === "live"
+      ? "Precio SOL medido en vivo"
+      : "Precio SOL asumido por declaración del sistema (no medición en vivo)";
+  }
+  document.getElementById("top-wr").textContent =
+    (Number(pw.closed_count) > 0) ? `${botStatus.winrate_pct}%` : ND_SHORT;
+  document.getElementById("top-pnl").textContent = nd(pw.pnl_sol, fmtSolSign);
+  document.getElementById("top-open-count").textContent = nd(pw.open_count, fmtInt.format);
 
   // Bot Toggle
   const botBtn = document.getElementById("btn-bot-toggle");
@@ -1790,49 +3431,83 @@ function renderBotStatus() {
     botBtn.innerHTML = "<span>⏸️</span> BOT IA: PAUSADO";
   }
 
-  // HUD
-  const capNow = 100.0 + (botStatus.total_pnl_sol ?? 0);
-  document.getElementById("bot-capital-now").textContent = `${capNow.toFixed(2)} SOL`;
-  document.getElementById("bot-pnl-total").textContent = `${(botStatus.total_pnl_sol ?? 0) >= 0 ? '+' : ''}${botStatus.total_pnl_sol ?? 0} SOL ($${botStatus.total_pnl_usd ?? 0})`;
-  document.getElementById("bot-wr-total").textContent = `${botStatus.winrate_pct ?? 0}%`;
-  document.getElementById("bot-open-positions-count").textContent = botStatus.open_count ?? 0;
+  // HUD (dashboard.paper_wallet)
+  document.getElementById("bot-capital-init").textContent = nd(pw.initial_usd, fmtUsd2.format);
+  const equityEl = document.getElementById("bot-capital-now");
+  equityEl.textContent = nd(pw.equity_usd, fmtUsd2.format);
+  equityEl.className = "bot-hud-val " +
+    (typeof pw.equity_usd === "number" && typeof pw.pnl_sol === "number" ? (pw.pnl_sol >= 0 ? "neon-green" : "bad") : "");
+
+  const pnlEl = document.getElementById("bot-pnl-total");
+  if (pw.pnl_sol === null || pw.pnl_sol === undefined) {
+    pnlEl.textContent = ND;
+    pnlEl.className = "bot-hud-val";
+  } else {
+    pnlEl.textContent = (pw.pnl_usd === null || pw.pnl_usd === undefined)
+      ? fmtSolSign(pw.pnl_sol)
+      : `${fmtSolSign(pw.pnl_sol)} (${fmtUsd2.format(pw.pnl_usd)})`;
+    pnlEl.className = "bot-hud-val " + (pw.pnl_sol >= 0 ? "ok" : "bad");
+  }
+
+  const wrEl = document.getElementById("bot-wr-total");
+  wrEl.textContent = (Number(pw.closed_count) > 0) ? `${botStatus.winrate_pct}%` : ND;
+  wrEl.title = (Number(pw.closed_count) > 0)
+    ? `Sobre ${pw.closed_count} operaciones cerradas`
+    : "Sin operaciones cerradas todavía: el winrate no es medible";
+
+  document.getElementById("bot-open-positions-count").textContent = nd(pw.open_count, fmtInt.format);
 
   // Feed de precios real (DexScreener): estado observable, no decorativo.
   const feedEl = document.getElementById("bot-feed-status");
   if (feedEl) {
-    const f = botStatus.feed || {};
-    if (f.source) {
-      feedEl.textContent = `${f.source} · ${f.calls ?? 0} calls · ${f.misses ?? 0} sin dato`;
-      feedEl.className = "bot-hud-val " + ((f.errors ?? 0) > 0 ? "warn" : "ok");
+    if (rt.feed_source) {
+      const ageTxt = nd(rt.feed_age_s, (v) => `${v.toFixed(1)}s`);
+      feedEl.textContent = `${rt.feed_source} · ${nd(rt.feed_misses, fmtInt.format)} misses · edad ${ageTxt}`;
+      feedEl.className = "bot-hud-val " + ((rt.stale || rt.last_feed_error) ? "warn" : "ok");
     } else {
-      feedEl.textContent = "sin feed (precios congelados)";
+      feedEl.textContent = "sin feed (fail-closed)";
       feedEl.className = "bot-hud-val bad";
     }
   }
 
-  // Positions Table
+  // Nota de runtime + procedencia de métricas (ley anti-falacia).
+  const rtNote = document.getElementById("bot-runtime-note");
+  if (rtNote) {
+    const chips = [];
+    chips.push(rt.loop_alive === true ? "loop autónomo: activo"
+      : (rt.loop_alive === false ? "loop autónomo: caído" : `loop: ${ND_SHORT}`));
+    if (rt.stale === true) chips.push("⚠️ datos stale (sin ciclos recientes del pipeline)");
+    if (rt.last_feed_error) chips.push(`último error feed: ${rt.last_feed_error}`);
+    if (mk.pnl === false) chips.push("PnL: sin métrica medible");
+    rtNote.textContent = chips.join("  ·  ");
+  }
+
+  // Positions Table (lista canónica dashboard.open_positions)
   const pBody = document.getElementById("bot-positions-body");
   pBody.innerHTML = "";
-  const positions = botStatus.open_positions || [];
+  const positions = Array.isArray(dash.open_positions) ? dash.open_positions : [];
 
   if (positions.length === 0) {
     pBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--dim); padding:20px;">Sin posiciones abiertas activas en este momento.</td></tr>`;
   } else {
     positions.forEach(p => {
       const tr = document.createElement("tr");
-      const pnlCls = p.pnl_pct >= 0 ? "ok" : "bad";
-
-      // Progress bar percentage between -33.49% and +150%
-      const pctClamped = Math.max(-33.49, Math.min(150, p.pnl_pct));
-      const barFillPct = ((pctClamped - (-33.49)) / (150 - (-33.49))) * 100;
+      const pnlNum = (typeof p.pnl_pct === "number") ? p.pnl_pct : null;
+      const pnlCls = pnlNum === null ? "" : (pnlNum >= 0 ? "ok" : "bad");
+      const barFillPct = pnlNum === null ? 0 :
+        Math.max(0, Math.min(100, ((Math.max(-33.49, Math.min(150, pnlNum)) - (-33.49)) / (150 - (-33.49))) * 100));
+      const hits = [];
+      if (p.tp1_hit) hits.push("✅ TP1 · 50%");
+      if (p.be_hit) hits.push("🔒 BE · 25%");
+      if (p.tp2_hit) hits.push("🏁 TP2 · 150%");
 
       tr.innerHTML = `
-        <td><b>${p.symbol}</b> <span class="dim" style="font-size:10px;">${p.mint.slice(0, 4)}...</span></td>
-        <td>$${p.entry_mc.toLocaleString()}</td>
-        <td>$${p.current_mc.toLocaleString()}</td>
-        <td>${p.size_sol} SOL</td>
-        <td class="${pnlCls}"><b>${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(2)}%</b></td>
-        <td class="${pnlCls}">$${p.pnl_usd.toFixed(2)}</td>
+        <td><b>${escapeHtml(p.symbol || "TOK")}</b> <span class="dim" style="font-size:10px;">${(p.mint || "").slice(0, 4)}...</span></td>
+        <td>${nd(p.entry_mc, (v) => fmtUsd2.format(v))}</td>
+        <td>${nd(p.current_mc, (v) => fmtUsd2.format(v))}</td>
+        <td>${nd(p.size_sol, (v) => `${v} SOL`)}</td>
+        <td class="${pnlCls}"><b>${nd(pnlNum, fmtPctSign2)}</b></td>
+        <td class="${pnlCls}">${nd(p.pnl_usd, (v) => fmtUsd2.format(v))}</td>
         <td style="min-width:200px;">
           <div class="exit-bar-wrap">
             <div class="exit-bar-fill" style="width:${barFillPct.toFixed(1)}%;"></div>
@@ -1844,6 +3519,7 @@ function renderBotStatus() {
             <span class="ok">TP1 +50%</span>
             <span class="neon-green">TP2 +150%</span>
           </div>
+          ${hits.length ? `<div style="font-size:9.5px; margin-top:2px;">${hits.join(" · ")}</div>` : ""}
         </td>
         <td>
           <button class="btn-close-pos" onclick="closePosition('${p.mint}')">Cerrar</button>
@@ -1853,28 +3529,428 @@ function renderBotStatus() {
     });
   }
 
-  // Closed Trades Table
+  // Closed Trades Table (contrato raíz admitido: `recent_closed`)
   const cBody = document.getElementById("bot-closed-body");
   cBody.innerHTML = "";
-  const closed = botStatus.recent_closed || [];
+  const closed = Array.isArray(botStatus.recent_closed) ? botStatus.recent_closed : [];
 
   if (closed.length === 0) {
     cBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--dim); padding:20px;">Sin historial de cierres todavía.</td></tr>`;
   } else {
     closed.forEach(c => {
       const tr = document.createElement("tr");
-      const pnlCls = c.pnl_pct >= 0 ? "ok" : "bad";
+      const cPnl = (typeof c.pnl_pct === "number") ? c.pnl_pct : null;
+      const pnlCls = cPnl === null ? "" : (cPnl >= 0 ? "ok" : "bad");
       tr.innerHTML = `
-        <td><b>${c.symbol}</b></td>
-        <td>$${c.entry_mc.toLocaleString()}</td>
-        <td>$${c.current_mc.toLocaleString()}</td>
-        <td class="${pnlCls}"><b>${c.pnl_pct >= 0 ? '+' : ''}${c.pnl_pct.toFixed(2)}%</b></td>
-        <td class="${pnlCls}">$${c.pnl_usd.toFixed(2)}</td>
-        <td style="font-family:sans-serif; font-size:11px; color:var(--accent);">🛡️ ${c.exit_reason || "MANUAL"}</td>
+        <td><b>${escapeHtml(c.symbol || "TOK")}</b></td>
+        <td>${nd(c.entry_mc, (v) => fmtUsd2.format(v))}</td>
+        <td>${nd(c.current_mc, (v) => fmtUsd2.format(v))}</td>
+        <td class="${pnlCls}"><b>${nd(cPnl, fmtPctSign2)}</b></td>
+        <td class="${pnlCls}">${nd(c.pnl_usd, (v) => fmtUsd2.format(v))}</td>
+        <td style="font-family:sans-serif; font-size:11px; color:var(--accent);">🛡️ ${escapeHtml(c.exit_reason || "SIN MOTIVO REGISTRADO")}</td>
       `;
       cBody.appendChild(tr);
     });
   }
+
+  // Shadow Veto Ledger (dashboard.shadow_vetos) & Auto-Evolution Tables
+  const shBody = document.getElementById("bot-shadow-body");
+  if (shBody) {
+    const shRows = Array.isArray(dash.shadow_vetos) ? dash.shadow_vetos : [];
+    if (shRows.length === 0) {
+      shBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--dim); padding:14px;">Libro de sombra vacío: aún no hay vetos con contrafactual medido.</td></tr>`;
+    } else {
+      shBody.innerHTML = shRows.slice(0, 8).map(r => {
+        const cf = (typeof r.counterfactual_pnl_pct === "number") ? r.counterfactual_pnl_pct : null;
+        const verd = r.verdict || "PENDING";
+        const badgeCls = verd === "TRUE_SAVE" ? "safe" : (verd === "FALSE_VETO" ? "danger" : "warn");
+        const verdTxt = verd === "TRUE_SAVE" ? "✅ SALVADA REAL" : (verd === "FALSE_VETO" ? "⚠️ FALSO VETO" : "⏳ EN OBSERVACIÓN");
+        return `<tr>
+          <td><b>${escapeHtml(r.symbol || "TOK")}</b></td>
+          <td>${nd(r.entry_mc_usd, (v) => fmtUsd2.format(v))} → ${nd(r.current_mc_usd, (v) => fmtUsd2.format(v))}</td>
+          <td class="${cf === null ? "" : (cf < 0 ? "bad" : "ok")}"><b>${nd(cf, fmtPctSign1)}</b></td>
+          <td><span class="shield-badge ${badgeCls}">${verdTxt}</span></td>
+          <td style="font-size:10px; color:var(--dim);">${escapeHtml((r.veto_reason || "sin motivo registrado").slice(0, 42))}</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+
+  // Auto-evolución: resumen desde dashboard.evolution + detalle desde el store.
+  const evoBody = document.getElementById("bot-evolution-body");
+  const evoBadge = document.getElementById("bot-evo-rules-badge");
+  const decT = document.getElementById("bot-decider-thresholds");
+  if (evoBadge) {
+    if (evo.evolutions_count === null || evo.evolutions_count === undefined) {
+      evoBadge.textContent = "SIN CICLOS REGISTRADOS";
+      evoBadge.className = "shield-badge warn";
+    } else if (Number(evo.evolutions_count) === 0) {
+      evoBadge.textContent = "0 CICLOS · FILTROS EN LITERAL";
+      evoBadge.className = "shield-badge";
+    } else {
+      evoBadge.textContent = `${evo.evolutions_count} ciclos post-mortem`;
+      evoBadge.className = "shield-badge safe";
+    }
+    const lrc = evo.last_rule_change;
+    evoBadge.title = [
+      `${nd(evo.true_saves, fmtInt.format)} salvadas reales`,
+      `${nd(evo.false_vetos, fmtInt.format)} falsos vetos`,
+      `pérdida evitada ${nd(evo.avoided_loss_pct, (v) => `${v}%`)}`,
+      (lrc && lrc.rule ? `último cambio: ${lrc.rule} ${lrc.old} → ${lrc.new}` : null),
+    ].filter(Boolean).join(" · ");
+  }
+  if (evoBody) {
+    const evRows = Array.isArray(evoRoot.evolution_events) ? evoRoot.evolution_events : [];
+    if (evRows.length === 0) {
+      evoBody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--dim); padding:14px;">Sin ciclos post-mortem registrados todavía (se disparan al cerrar operaciones).</td></tr>`;
+    } else {
+      evoBody.innerHTML = evRows.slice(0, 8).map(e => {
+        const pnl = (typeof e.pnl_pct === "number") ? e.pnl_pct : null;
+        const adj = e.rule_adjusted
+          ? `<code>${escapeHtml(e.rule_adjusted)}: ${escapeHtml(e.old_val)} → ${escapeHtml(e.new_val)}</code>`
+          : `<span class="ok">Refuerzo BUY</span>`;
+        return `<tr>
+          <td><b>${escapeHtml(e.symbol || "TOK")}</b></td>
+          <td class="${pnl === null ? "" : (pnl >= 0 ? 'ok' : 'bad')}"><b>${nd(pnl, fmtPctSign1)}</b></td>
+          <td style="font-size:10px; color:var(--fg);">${escapeHtml((e.diagnosis || "sin diagnóstico registrado").slice(0, 68))}</td>
+          <td style="font-size:10px;">${adj}</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+  if (decT) renderDeciderThresholds(decT);
+}
+
+async function triggerShadowCheck() {
+  showToast("Consultando precios reales en DexScreener para tokens vetados...");
+  try {
+    const res = await fetch("/api/evolution/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (data.ok) {
+      await Promise.all([fetchBotStatus(), fetchEvolutionStatus()]);
+      showToast("Libro Contrafactual de Sombra actualizado");
+    } else {
+      showToast("El motor de evolución no pudo ejecutarse");
+    }
+  } catch (err) {
+    showToast("Error actualizando libro de sombra: " + err);
+  }
+}
+
+// =========================================================================
+// VIEW PIPELINE: TRAZAS E0→E6, UMBRALES DEL DECISOR Y CONSOLA SSE (P1/P0.3)
+// =========================================================================
+const PIPELINE_SCHEMA_EXPECTED = "pipeline/1";
+const PIPELINE_STAGE_LABELS = {
+  E0_discovery: "E0 · Descubrimiento en feed",
+  E1_metrics_known: "E1 · Auditoría de métricas on-chain",
+  E3_bundler: "E3 · Bundler / snipers bloque 0",
+  E3_dev_factory: "E3 · Fábrica serial del dev",
+  E3_wash_trading: "E3 · Wash-trading en escalera",
+  E3_clone_factory: "E3 · Clon homónimo / vamp",
+  E3_dev_holding: "E3 · Dev holding",
+  E3_cabal_top10: "E3 · Concentración top-10 (Cabal)",
+  E3_liquidity_ratio: "E3 · Ratio liquidez / market cap",
+  E4_ev_net: "E4 · Puerta de EV neto",
+  E4_ml_probability: "E4b · Probabilidad ML (arquetipo)",
+  E5_verdict: "E5 · Veredicto de confluencia",
+  E6_execution: "E6 · Ejecución paper",
+};
+const PIPELINE_VERDICT_ICON = { pass: "✅", fail: "⛔", skip: "⏭️", info: "ℹ️" };
+const EVENT_KINDS = ["stage", "decision", "trade_open", "trade_close", "evo", "feed", "error"];
+let evolutionStatus = null;
+
+async function fetchEvolutionStatus() {
+  try {
+    const res = await fetch("/api/evolution/status");
+    const data = await res.json();
+    if (data.ok) {
+      evolutionStatus = data;
+      const decT = document.getElementById("bot-decider-thresholds");
+      if (decT) renderDeciderThresholds(decT);
+    }
+  } catch (err) {
+    console.error("Error fetching evolution status:", err);
+  }
+}
+
+function renderDeciderThresholds(el) {
+  if (!evolutionStatus || !evolutionStatus.decider_thresholds) {
+    el.textContent = `Umbrales del decisor: ${ND}`;
+    return;
+  }
+  const dt = evolutionStatus.decider_thresholds || {};
+  const keys = Object.keys(dt);
+  if (keys.length === 0) {
+    el.textContent = `Umbrales del decisor: ${ND}`;
+    return;
+  }
+  const closedSeen = dt[keys[0]].closed_trades_seen;
+  const minN = dt[keys[0]].min_n;
+  const parts = keys.map(k => {
+    const r = dt[k] || {};
+    const kind = r.source === "adaptive_rule" ? "ADAPT" : "LITERAL";
+    const gate = r.unlocked === true
+      ? "desbloqueada"
+      : `bloqueada N=${nd(r.n_support, fmtInt.format)}/${nd(r.min_n, fmtInt.format)}`;
+    return `${k}=${nd(r.value)} (${kind} · ${gate})`;
+  });
+  el.textContent = `Umbrales del decisor [cierres contados: ${nd(closedSeen, fmtInt.format)} · BP-003: N<${nd(minN, fmtInt.format)} no mueve umbrales]: ${parts.join(" · ")}`;
+}
+
+async function fetchPipeline() {
+  try {
+    const res = await fetch("/api/pipeline/live?limit=40&window_s=3600");
+    const data = await res.json();
+    if (data.ok) {
+      if (data.schema && data.schema !== PIPELINE_SCHEMA_EXPECTED) {
+        console.warn("esquema de pipeline inesperado:", data.schema);
+      }
+      pipelineData = data;
+      renderPipeline();
+    }
+  } catch (err) {
+    console.error("Error fetching pipeline:", err);
+  }
+}
+
+function pipelineVerdictChip(verdict) {
+  const v = verdict || "PENDING";
+  if (v === "ADMITTED") return `<span class="shield-badge safe">✅ ADMITIDO</span>`;
+  if (v === "VETO") return `<span class="shield-badge danger">⛔ VETADO</span>`;
+  return `<span class="shield-badge warn">⏳ ${v}</span>`;
+}
+
+function renderPipeline() {
+  const body = document.getElementById("pipeline-traces-body");
+  if (!pipelineData || !body) return;
+
+  if (pipelineData.available === false) {
+    body.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--dim); padding:18px;">${pipelineData.reason || "Trazas de decisión no disponibles"}</td></tr>`;
+    return;
+  }
+
+  const funnel = pipelineData.funnel || {};
+  const fnum = (k) => (typeof funnel[k] === "number" && Number.isFinite(funnel[k])) ? funnel[k] : null;
+  const seen = fnum("seen");
+  const veto = fnum("veto");
+  const neutral = fnum("neutral");
+  const admitted = fnum("admitted");
+  const executed = fnum("executed");
+  const vetoByStage = funnel.veto_by_stage || {};
+
+  const winLabel = document.getElementById("pipeline-window-label");
+  if (winLabel) {
+    const winS = (typeof pipelineData.window_s === "number") ? pipelineData.window_s : null;
+    winLabel.textContent = winS === null
+      ? `Ventana: ${ND}`
+      : `Ventana: ${(winS / 60).toFixed(0)} min · ${nd((pipelineData.traces || []).length, fmtInt.format)} trazas`;
+  }
+
+  const funnelEl = document.getElementById("pipeline-funnel");
+  if (funnelEl) {
+    const pctOf = (n) => (seen !== null && seen > 0 && n !== null) ? `${((n / seen) * 100).toFixed(1)}% de vistos` : ND;
+    const cards = [
+      { label: "Vistos (E0)", val: seen, sub: "tokens evaluados en la ventana", cls: "" },
+      { label: "Vetados", val: veto, sub: pctOf(veto), cls: "bad" },
+      { label: "Neutrales / sin EV", val: neutral, sub: pctOf(neutral), cls: "" },
+      { label: "Admitidos", val: admitted, sub: pctOf(admitted), cls: "ok" },
+      { label: "Ejecutados (E6)", val: executed, sub: "posiciones paper abiertas", cls: "accent" },
+    ];
+    funnelEl.innerHTML = cards.map(c => `
+      <div class="funnel-card">
+        <span class="funnel-label">${c.label}</span>
+        <span class="funnel-val ${c.cls}">${nd(c.val, fmtInt.format)}</span>
+        <span class="funnel-sub">${c.sub}</span>
+      </div>`).join("");
+  }
+
+  const barEl = document.getElementById("pipeline-funnel-bar");
+  if (barEl) {
+    const total = Math.max(1, seen || 0);
+    const segs = [
+      { cls: "veto", n: veto },
+      { cls: "neutral", n: neutral },
+      { cls: "admitted", n: admitted },
+    ];
+    barEl.innerHTML = segs.map(s =>
+      `<div class="funnel-seg ${s.cls}" style="width:${s.n === null ? "0" : ((s.n / total) * 100).toFixed(2)}%;" title="${s.cls}: ${s.n === null ? ND_SHORT : s.n}"></div>`
+    ).join("");
+  }
+
+  const vetoEl = document.getElementById("pipeline-veto-stages");
+  if (vetoEl) {
+    const entries = Object.entries(vetoByStage).sort((a, b) => b[1] - a[1]);
+    vetoEl.innerHTML = entries.length === 0
+      ? `<span class="dim">Sin vetos por etapa en la ventana</span>`
+      : entries.map(([stage, n]) =>
+        `<span class="filter-chip" style="padding:2px 8px; font-size:10px;">${PIPELINE_STAGE_LABELS[stage] || stage}: <b>${n}</b></span>`
+      ).join(" ");
+  }
+
+  const traces = Array.isArray(pipelineData.traces) ? pipelineData.traces : [];
+  if (traces.length === 0) {
+    body.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--dim); padding:18px;">Sin decisiones registradas en la ventana. El radar sigue filtrando en vivo…</td></tr>`;
+  } else {
+    body.innerHTML = traces.map((t, idx) => {
+      const tsTxt = (typeof t.ts === "number") ? consoleTimeFmt.format(new Date(t.ts * 1000)) : ND_SHORT;
+      const execTxt = t.executed === true ? `<span class="ok">sí</span>` : (t.executed === false ? `<span class="dim">no</span>` : ND_SHORT);
+      return `<tr class="pipeline-row" style="cursor:pointer;" onclick="selectTrace(${idx})">
+        <td>${tsTxt}</td>
+        <td><b>${escapeHtml(t.symbol || "TOK")}</b> <span class="dim" style="font-size:10px;">${(t.mint || "").slice(0, 4)}…</span></td>
+        <td>${pipelineVerdictChip(t.verdict)}</td>
+        <td style="font-size:10px;">${t.veto_stage ? (PIPELINE_STAGE_LABELS[t.veto_stage] || t.veto_stage) : "—"}</td>
+        <td>${execTxt}</td>
+      </tr>`;
+    }).join("");
+  }
+}
+
+function selectTrace(idx) {
+  if (!pipelineData || !Array.isArray(pipelineData.traces)) return;
+  const t = pipelineData.traces[idx];
+  if (!t) return;
+  selectedTrace = t;
+  renderTraceDetail(t);
+  if (t.mint) fetchTraceHistory(t.mint);
+}
+
+function renderTraceDetail(t) {
+  const title = document.getElementById("pipeline-detail-title");
+  if (title) title.textContent = `Cascada E0 → E6 · ${t.symbol || "TOK"} (${t.verdict || ND_SHORT})`;
+  const el = document.getElementById("pipeline-detail-stages");
+  if (!el) return;
+  const stages = Array.isArray(t.stages) ? t.stages : [];
+  if (stages.length === 0) {
+    el.innerHTML = `<div class="dim" style="font-size:10.5px;">Traza sin etapas detalladas (${ND}).</div>`;
+    return;
+  }
+  el.innerHTML = stages.map(s => {
+    const v = s.verdict || "info";
+    const icon = PIPELINE_VERDICT_ICON[v] || "•";
+    const label = PIPELINE_STAGE_LABELS[s.stage] || s.stage || "etapa";
+    const valTxt = nd(s.value, (x) => (typeof x === "number" ? fmt2.format(x) : String(x)));
+    const thrTxt = (s.threshold === null || s.threshold === undefined) ? ND_SHORT : `${s.operator || ""} ${s.threshold}`;
+    const kind = s.source_kind || "default_literal";
+    return `<div class="stage-row ${v}">
+      <span>${icon}</span>
+      <span class="stage-name"><b>${label}</b>${s.reason ? `<br/><span class="dim">${s.reason}</span>` : ""}</span>
+      <span class="stage-meta">${valTxt} ${thrTxt}<br/><span class="stage-kind ${kind}">${kind === "adaptive_rule" ? "REGLA ADAPTATIVA" : "LITERAL DECLARADO"}</span></span>
+    </div>`;
+  }).join("");
+}
+
+async function fetchTraceHistory(mint) {
+  const el = document.getElementById("pipeline-mint-history");
+  if (!el) return;
+  el.textContent = "consultando historial…";
+  try {
+    const res = await fetch(`/api/pipeline/trace/${encodeURIComponent(mint)}`);
+    const data = await res.json();
+    if (!data.ok || !Array.isArray(data.traces) || data.traces.length === 0) {
+      el.textContent = "Sin historial adicional para este mint.";
+      return;
+    }
+    el.innerHTML = data.traces.slice(0, 6).map(tr => {
+      const tsTxt = (typeof tr.ts === "number") ? consoleTimeFmt.format(new Date(tr.ts * 1000)) : ND_SHORT;
+      return `<div style="display:flex; gap:6px; align-items:center;">${pipelineVerdictChip(tr.verdict)} <span class="dim">${tsTxt} · ${tr.veto_stage || "—"}</span></div>`;
+    }).join("");
+  } catch (err) {
+    el.textContent = "Error consultando historial del mint.";
+    console.error("Error fetching trace history:", err);
+  }
+}
+
+// ---- Consola SSE (EventBus): prime por /api/logs + stream /api/events ----
+function consoleRow(ts, kind, msg) {
+  const cls = EVENT_KINDS.includes(kind) ? kind : "info";
+  return `<div class="console-row">
+    <span class="console-ts">${ts}</span>
+    <span class="console-kind ${cls}">${kind}</span>
+    <span class="console-msg">${escapeHtml(msg)}</span>
+  </div>`;
+}
+
+function consoleMessageFor(kind, d) {
+  const dd = d || {};
+  if (kind === "stage") return `${dd.symbol || dd.mint || "tok"} · ${dd.stage || ND_SHORT} · ${dd.reason || ""}`.trim();
+  if (kind === "decision") return `${dd.symbol || dd.mint || "tok"} → ${dd.verdict || ND_SHORT}${dd.veto_reason ? " · " + dd.veto_reason : ""}`;
+  if (kind === "trade_open") return `${dd.symbol || dd.mint || "tok"} abierta @ ${nd(dd.entry_mc_usd, (v) => fmtUsd2.format(v))}`;
+  if (kind === "trade_close") return `${dd.symbol || dd.mint || "tok"} cerrada · ${nd(dd.pnl_pct, fmtPctSign1)} (${dd.exit_reason || ND_SHORT})`;
+  if (kind === "evo") return `auto-evolución: ${dd.rule || dd.action || "ciclo"} ${(dd.old !== undefined && dd.old !== null) ? `${dd.old} → ${dd.new}` : ""}`.trim();
+  if (kind === "feed") return `feed precios: ${dd.source || ND_SHORT} ${dd.calls !== undefined ? `· ${dd.calls} calls` : ""}`.trim();
+  if (kind === "error") return `⚠️ ${dd.message || dd.error || ND_SHORT}`;
+  try { return JSON.stringify(dd).slice(0, 160); } catch (e) { return ND_SHORT; }
+}
+
+function appendConsole(ts, kind, msg) {
+  const el = document.getElementById("pipeline-console");
+  if (!el || consolePaused) return;
+  el.insertAdjacentHTML("beforeend", consoleRow(ts, kind, msg));
+  while (el.children.length > 250) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function primeConsole() {
+  if (consolePrimed) return;
+  consolePrimed = true;
+  try {
+    const res = await fetch("/api/logs?limit=60");
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.events)) {
+      data.events.forEach(ev => {
+        const ts = (typeof ev.ts === "number") ? consoleTimeFmt.format(new Date(ev.ts * 1000)) : ND_SHORT;
+        appendConsole(ts, ev.kind || "info", consoleMessageFor(ev.kind, ev.data));
+      });
+    }
+  } catch (err) {
+    console.error("Error priming console:", err);
+  }
+}
+
+function ensureEventStream() {
+  primeConsole();
+  if (eventStream) return;
+  const statusEl = document.getElementById("console-status");
+  eventStream = new EventSource("/api/events");
+  eventStream.onopen = () => {
+    if (statusEl) { statusEl.textContent = "conectado"; statusEl.className = "shield-badge safe"; }
+  };
+  eventStream.onerror = () => {
+    if (statusEl) { statusEl.textContent = "reconectando…"; statusEl.className = "shield-badge warn"; }
+    // Si el stream quedó CERRADO, recrearlo (el EventSource viejo se descarta; sin fugas)
+    if (eventStream && eventStream.readyState === EventSource.CLOSED) {
+      eventStream = null;
+      window.setTimeout(() => { ensureEventStream(); }, 5000);
+    }
+  };
+  EVENT_KINDS.forEach(kind => {
+    eventStream.addEventListener(kind, ev => {
+      let payload = {};
+      try { payload = JSON.parse(ev.data || "{}"); } catch (e) { payload = {}; }
+      const ts = consoleTimeFmt.format(new Date());
+      appendConsole(ts, kind, consoleMessageFor(kind, payload));
+      if (kind === "trade_close" || kind === "decision") {
+        fetchPipeline();
+        fetchBotStatus();
+      }
+    });
+  });
+}
+
+function toggleConsolePause() {
+  consolePaused = !consolePaused;
+  const btn = document.getElementById("btn-console-pause");
+  if (btn) btn.textContent = consolePaused ? "▶ Reanudar" : "⏸ Pausar";
+}
+
+function clearConsole() {
+  const el = document.getElementById("pipeline-console");
+  if (el) el.innerHTML = "";
 }
 
 async function toggleAutoBot() {
@@ -2025,15 +4101,48 @@ async function load3dSnapshot() {
       let btHtml = "";
       for (const b of (s.bias || [])) {
         const isTrap = b.label.indexOf("ILUSIÓN") >= 0;
-        btHtml += `<tr style="${isTrap ? 'color:var(--bad);' : 'color:var(--ok);'}">
-          <td>${isTrap ? '⚠️ Con Lookahead' : '🟢 Causal (Observable)'}</td>
+        const isUniverse = b.label.indexOf("Universo total") >= 0;
+        const rowLabel = isTrap ? "⚠️ Con Lookahead (ILUSIÓN)"
+          : (isUniverse ? "🌐 Universo total" : "🟢 Sin condición futura (REAL)");
+        btHtml += `<tr style="${isTrap ? 'color:var(--bad);' : (isUniverse ? 'color:var(--accent);' : 'color:var(--ok);')}">
+          <td>${rowLabel}</td>
           <td>${b.n_tokens}</td>
-          <td>${b.hit50_pct.toFixed(1)}%</td>
-          <td>${b.paper_wr_pct ? b.paper_wr_pct.toFixed(1) + '%' : '–'}</td>
+          <td>${b.hit50_pct === null || b.hit50_pct === undefined ? ND_SHORT : b.hit50_pct.toFixed(1) + '%'}</td>
+          <td>${nd(b.paper_wr_pct, v => v.toFixed(1) + '%')}</td>
         </tr>`;
       }
       const bBody = document.getElementById("bias-table").querySelector("tbody");
       if (bBody) bBody.innerHTML = btHtml;
+
+      // Cabecera y veredicto SIN cifras hardcodeadas: todo sale del snapshot real.
+      const u = s.universe || {};
+      const note = document.getElementById("bias-note");
+      if (note) {
+        const dbName = (s.source && s.source.db) || ND_SHORT;
+        const measurable = u.n_tokens_hit50_measurable;
+        note.textContent = `Manifold 3D de ${nd(u.n_tokens, fmtInt.format)} tokens de ${dbName}`
+          + (measurable === 0
+            ? " · el acierto a +50% NO es medible en esta base (falta rise50At)"
+            : "");
+      }
+      const verdict = document.getElementById("bias-verdict");
+      if (verdict) {
+        const segs = s.bias || [];
+        const trap = segs.find(x => (x.label || "").indexOf("ILUSIÓN") >= 0);
+        const causal = segs.find(x => (x.label || "").indexOf("REAL") >= 0);
+        if (trap && causal && trap.hit50_pct !== null && causal.hit50_pct !== null) {
+          verdict.innerHTML = `💡 El filtro con condición futura (`
+            + `<span class="warn">MC final ≥ $4,500</span>) infla el acierto a +50% de `
+            + `<span class="bad">${causal.hit50_pct.toFixed(2)}%</span> a `
+            + `<span class="warn">${trap.hit50_pct.toFixed(2)}%</span>. Ese salto es lookahead, no edge.`;
+        } else if (u.n_tokens_hit50_measurable === 0) {
+          verdict.innerHTML = `💡 El acierto a +50% no es medible con el esquema actual de la base: `
+            + `se muestra <span class="warn">${ND_SHORT}</span> en vez de un 0% falso.`;
+        } else {
+          verdict.innerHTML = `💡 Compara la fila con condición futura contra la causal: `
+            + `la diferencia es lookahead, no edge.`;
+        }
+      }
     }
   } catch (err) {
     console.error("Error loading 3D snapshot:", err);
@@ -2099,14 +4208,25 @@ function renderAiStatus(data) {
     modelInput.value = modelName;
   }
 
-  // ML Quant Booster metrics
+  // ML Quant Booster metrics (ley anti-falacia: 0.0 significa "sin dato", no métrica medida)
   const qm = data.quant_model || {};
+  const qmRoc = (typeof qm.test_roc_auc === "number" && qm.test_roc_auc > 0) ? qm.test_roc_auc : null;
   const rocBadge = document.getElementById("ml-status-badge");
-  if (rocBadge) rocBadge.textContent = `ROC-AUC: ${(qm.test_roc_auc || 0.91).toFixed(4)}`;
+  if (rocBadge) {
+    rocBadge.textContent = qmRoc !== null ? `ROC-AUC: ${qmRoc.toFixed(4)}` : `ROC-AUC: ${ND_SHORT}`;
+    rocBadge.className = "shield-badge " + (qmRoc !== null ? "safe" : "warn");
+    rocBadge.title = qm.status ? `Estado modelo: ${qm.status}` : "";
+  }
   const trSamples = document.getElementById("ml-train-samples");
-  if (trSamples) trSamples.textContent = `${(qm.train_samples || 29598).toLocaleString()} tokens`;
+  if (trSamples) {
+    const nTr = (typeof qm.train_samples === "number" && qm.train_samples > 0) ? qm.train_samples : null;
+    trSamples.textContent = nTr !== null ? `${fmtInt.format(nTr)} muestras` : ND;
+  }
   const acc = document.getElementById("ml-accuracy");
-  if (acc) acc.textContent = `${((qm.test_accuracy || 0.9166) * 100).toFixed(2)}%`;
+  if (acc) {
+    const aVal = (typeof qm.test_accuracy === "number" && qm.test_accuracy > 0) ? qm.test_accuracy : null;
+    acc.textContent = aVal !== null ? `${(aVal * 100).toFixed(2)}%` : ND;
+  }
 
   // Browser Agent status
   const ba = data.browser_agent || {};
@@ -2152,7 +4272,7 @@ function renderAiGoals(goals) {
       </div>
       <div style="display:flex; align-items:center; gap:6px;">
         <span class="shield-badge ${badgeCls}">${g.status}</span>
-        <button style="background:transparent; border:none; color:var(--dim); cursor:pointer; font-size:12px; padding:2px 4px;" onclick="deleteGoal('${g.id}')" title="Eliminar objetivo">✕</button>
+        <button style="background:transparent; border:none; color:var(--dim); cursor:pointer; font-size:12px; padding:2px 4px;" onclick="deleteGoal('${g.id}')" title="Eliminar objetivo" aria-label="Eliminar objetivo">✕</button>
       </div>
     `;
     container.appendChild(item);
@@ -2173,9 +4293,31 @@ function updateProviderOptions() {
   } else {
     if (keyWrap) keyWrap.style.display = "block";
     if (ollamaWrap) ollamaWrap.style.display = "none";
-    if (prov === "gemini") input.value = "gemini-2.5-flash";
+    if (prov === "openrouter") input.value = "openrouter/auto";
+    else if (prov === "gemini") input.value = "gemini-2.5-flash";
     else if (prov === "anthropic") input.value = "claude-3-haiku-20240307";
     else if (prov === "groq") input.value = "llama-3.3-70b-versatile";
+  }
+}
+
+async function detectOpenRouterModelsFromUi() {
+  showToast("🌐 Consultando catálogo en vivo de OpenRouter (openrouter.ai)...");
+  try {
+    const res = await fetch("/api/ai/openrouter/models");
+    const data = await res.json();
+    if (data.ok && data.models && data.models.length > 0) {
+      const dl = document.getElementById("openrouter-models-datalist");
+      if (dl) {
+        dl.innerHTML = data.models.map(m => `<option value="${m.id}">${m.name || m.id}</option>`).join("");
+      }
+      const provSelect = document.getElementById("ai-provider-select");
+      if (provSelect) provSelect.value = "openrouter";
+      const modelInput = document.getElementById("ai-model-input");
+      if (modelInput) modelInput.value = data.models[0].id;
+      showToast(`¡Catálogo OpenRouter cargado (${data.models.length} modelos listos)!`);
+    }
+  } catch (err) {
+    showToast("Error consultando catálogo OpenRouter: " + err);
   }
 }
 
@@ -2271,7 +4413,10 @@ async function saveAiConfigFromUi() {
   const ollamaHost = ollamaHostInput ? ollamaHostInput.value.trim() : "";
 
   const payload = { provider: provider };
-  if (provider === "gemini") {
+  if (provider === "openrouter") {
+    payload.model_openrouter = modelName;
+    if (apiKey) payload.openrouter_api_key = apiKey;
+  } else if (provider === "gemini") {
     payload.model_gemini = modelName;
     if (apiKey) payload.gemini_api_key = apiKey;
   } else if (provider === "anthropic") {
@@ -2439,8 +4584,392 @@ window.addEventListener("DOMContentLoaded", async () => {
   await load3dSnapshot();
   await fetchAiStatus();
   startPolling();
+  startTelemetryPolling();
   requestAnimationFrame(draw3d);
 });
+
+// =========================================================================
+// MODERN QUANT COCKPIT DESKTOP & AI SUITE EXTENSIONS
+// =========================================================================
+
+let commandPaletteOpen = false;
+let aiDrawerOpen = false;
+let shortcutsModalOpen = false;
+let selectedCommandIndex = 0;
+
+const COCKPIT_COMMANDS = [
+  { id: "audit_selected", icon: "🔍", title: "Auditar Token Seleccionado con IA", shortcut: "Enter" },
+  { id: "cmd_boost", icon: "⚡", title: "Ejecutar /boost (Recalibrar Modelo ML Causal)", shortcut: "Alt+B" },
+  { id: "cmd_evolve", icon: "🧬", title: "Ejecutar /evolve (Auto-Mejora Post-Mortem)", shortcut: "Alt+E" },
+  { id: "cmd_shadow", icon: "🔮", title: "Ejecutar /shadow (Vetos Contrafactuales)", shortcut: "Alt+S" },
+  { id: "cmd_goal_eval", icon: "🎯", title: "Ejecutar /goal eval (Supervisar Metas Cuantitativas)", shortcut: "" },
+  { id: "cmd_browser", icon: "🌐", title: "Ejecutar /browser (Inspeccionar en DexScreener)", shortcut: "" },
+  { id: "panic_close", icon: "🚨", title: "BOTÓN DE PÁNICO: Cerrar todas las posiciones", shortcut: "Ctrl+Shift+P" },
+  { id: "toggle_bot", icon: "🤖", title: "Alternar Auto-Sniper Bot (Pausar/Activar)", shortcut: "Ctrl+Shift+B" },
+  { id: "export_trades", icon: "📥", title: "Exportar Datos y Posiciones a CSV / JSON", shortcut: "" },
+  { id: "take_screenshot", icon: "📸", title: "Capturar Pantalla de la Terminal (Portapapeles)", shortcut: "" },
+  { id: "nav_radar", icon: "📡", title: "Ir a Vista: Radar Alfa & Patrones IA", shortcut: "1" },
+  { id: "nav_3d", icon: "🌐", title: "Ir a Vista: Visor 3D Causal Forense", shortcut: "2" },
+  { id: "nav_smartmoney", icon: "🎯", title: "Ir a Vista: Smart Money & KOLs", shortcut: "3" },
+  { id: "nav_bot", icon: "🤖", title: "Ir a Vista: Bot Auto-Trader & Posiciones", shortcut: "4" },
+  { id: "nav_pipeline", icon: "⚡", title: "Ir a Vista: Pipeline en Vivo", shortcut: "5" },
+  { id: "nav_analytics", icon: "📊", title: "Ir a Vista: Análisis de Rendimiento", shortcut: "6" },
+  { id: "nav_tokens", icon: "🧭", title: "Ir a Vista: Tokens & Selección", shortcut: "7" }
+];
+
+function toggleCommandPalette() {
+  const modal = document.getElementById("cmd-palette-backdrop");
+  if (!modal) return;
+  commandPaletteOpen = !commandPaletteOpen;
+  if (commandPaletteOpen) {
+    modal.classList.add("open");
+    const input = document.getElementById("cmd-palette-input");
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
+    renderCommandList(COCKPIT_COMMANDS);
+  } else {
+    modal.classList.remove("open");
+  }
+}
+
+function renderCommandList(list) {
+  const container = document.getElementById("cmd-palette-list");
+  if (!container) return;
+  selectedCommandIndex = 0;
+  if (!list.length) {
+    container.innerHTML = `<div style="padding:14px; color:var(--dim); text-align:center;">No se encontraron comandos coincidentes</div>`;
+    return;
+  }
+  container.innerHTML = list.map((c, i) => `
+    <div class="cmd-item ${i === 0 ? 'selected' : ''}" data-cmd-id="${c.id}" onclick="executeCockpitCommand('${c.id}')" onmouseenter="selectCmdIndex(${i})">
+      <div class="cmd-item-left">
+        <span style="font-size:14px;">${c.icon}</span>
+        <span style="font-weight:600;">${c.title}</span>
+      </div>
+      ${c.shortcut ? `<kbd>${c.shortcut}</kbd>` : ''}
+    </div>
+  `).join('');
+}
+
+function selectCmdIndex(idx) {
+  selectedCommandIndex = idx;
+  const items = document.querySelectorAll(".cmd-item");
+  items.forEach((item, i) => {
+    item.classList.toggle("selected", i === idx);
+  });
+}
+
+function filterCommandPalette(val) {
+  const q = (val || "").toLowerCase().trim();
+  if (!q) {
+    renderCommandList(COCKPIT_COMMANDS);
+    return;
+  }
+  const filtered = COCKPIT_COMMANDS.filter(c => c.title.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+  renderCommandList(filtered);
+}
+
+function executeCockpitCommand(cmdId) {
+  toggleCommandPalette();
+  switch (cmdId) {
+    case "audit_selected":
+      if (selectedToken) {
+        openAiDrawerWithPrompt(`Audita en detalle el token ${selectedToken.symbol} (${selectedToken.mint})`);
+      } else {
+        openAiDrawerWithPrompt("Analiza los tokens con mejor confluencia en el radar ahora");
+      }
+      break;
+    case "cmd_boost":
+      openAiDrawerWithPrompt("/boost");
+      break;
+    case "cmd_evolve":
+      openAiDrawerWithPrompt("/evolve");
+      break;
+    case "cmd_shadow":
+      openAiDrawerWithPrompt("/shadow");
+      break;
+    case "cmd_goal_eval":
+      openAiDrawerWithPrompt("/goal eval");
+      break;
+    case "cmd_browser":
+      if (selectedToken && selectedToken.mint) {
+        openAiDrawerWithPrompt(`/browser ${selectedToken.mint}`);
+      } else {
+        openAiDrawerWithPrompt("/browser");
+      }
+      break;
+    case "panic_close":
+      triggerPanicClose();
+      break;
+    case "toggle_bot":
+      toggleAutoBot();
+      break;
+    case "export_trades":
+      exportCockpitData();
+      break;
+    case "take_screenshot":
+      takeCockpitScreenshot();
+      break;
+    case "nav_radar": switchMainMode("radar"); break;
+    case "nav_3d": switchMainMode("3d"); break;
+    case "nav_smartmoney": switchMainMode("smartmoney"); break;
+    case "nav_bot": switchMainMode("bot"); break;
+    case "nav_pipeline": switchMainMode("pipeline"); break;
+    case "nav_analytics": switchMainMode("analytics"); break;
+    case "nav_tokens": switchMainMode("tokens"); break;
+  }
+}
+
+function toggleAiDrawer() {
+  const drawer = document.getElementById("ai-slide-drawer");
+  if (!drawer) return;
+  aiDrawerOpen = !aiDrawerOpen;
+  drawer.classList.toggle("open", aiDrawerOpen);
+  if (aiDrawerOpen) {
+    const inp = document.getElementById("ai-drawer-input");
+    if (inp) inp.focus();
+  }
+}
+
+function openAiDrawerWithPrompt(promptText) {
+  if (!aiDrawerOpen) toggleAiDrawer();
+  const inp = document.getElementById("ai-drawer-input");
+  if (inp) {
+    inp.value = promptText;
+    sendAiDrawerMessage();
+  }
+}
+
+async function sendAiDrawerMessage(customText) {
+  const inp = document.getElementById("ai-drawer-input");
+  const msg = (customText || (inp ? inp.value : "")).trim();
+  if (!msg) return;
+  if (inp) inp.value = "";
+
+  const stream = document.getElementById("ai-drawer-stream");
+  if (!stream) return;
+
+  const userMsg = document.createElement("div");
+  userMsg.className = "ai-chat-msg user";
+  userMsg.innerHTML = `<b>Tú:</b> <span>${msg}</span>`;
+  stream.appendChild(userMsg);
+
+  const botMsg = document.createElement("div");
+  botMsg.className = "ai-chat-msg bot";
+  botMsg.innerHTML = `<b>✨ Copiloto IA:</b> <i>Analizando mercado y ejecutando inferencia...</i>`;
+  stream.appendChild(botMsg);
+  stream.scrollTop = stream.scrollHeight;
+
+  try {
+    const res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: msg,
+        context: {
+          selected_token: selectedToken,
+          current_mode: currentMode,
+          tokens_count: currentTokens.length
+        }
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      let formatted = (data.response || "")
+        .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
+        .replace(/\*(.*?)\*/g, "<i>$1</i>")
+        .replace(/`([^`]+)`/g, "<code style='background:#07090e; padding:2px 5px; border-radius:3px;'>$1</code>")
+        .replace(/\n/g, "<br/>");
+      botMsg.innerHTML = `<b>✨ Copiloto IA:</b><br/>${formatted}`;
+      if (data.command === "boost") {
+        await fetchAiStatus();
+        await fetchTokens();
+        showToast("¡Modelo ML reentrenado con éxito!");
+      }
+    } else {
+      botMsg.innerHTML = `<span style="color:var(--bad);">Error: ${data.error || "Fallo de inferencia"}</span>`;
+    }
+  } catch (err) {
+    botMsg.innerHTML = `<span style="color:var(--bad);">Error de conexión: ${err}</span>`;
+  }
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function toggleShortcutsModal() {
+  const modal = document.getElementById("shortcuts-modal");
+  if (!modal) return;
+  shortcutsModalOpen = !shortcutsModalOpen;
+  modal.classList.toggle("open", shortcutsModalOpen);
+}
+
+function popoutActiveMode() {
+  if (window.electronAPI && window.electronAPI.popoutWindow) {
+    window.electronAPI.popoutWindow(currentMode, `Pumpfun Cockpit — ${currentMode.toUpperCase()}`);
+    showToast(`Ventana separada abierta para: ${currentMode.toUpperCase()}`);
+  } else {
+    window.open(`/#mode=${currentMode}`, `_blank`, 'width=1100,height=750');
+  }
+}
+
+async function takeCockpitScreenshot() {
+  if (window.electronAPI && window.electronAPI.takeScreenshot) {
+    const res = await window.electronAPI.takeScreenshot();
+    if (res && res.ok) {
+      showToast("📸 Captura de pantalla copiada al portapapeles con éxito");
+    }
+  } else {
+    showToast("Captura nativa disponible en la app Electron");
+  }
+}
+
+async function exportCockpitData() {
+  const exportPayload = {
+    timestamp: new Date().toISOString(),
+    tokens: currentTokens,
+    dossiers: currentDossiers,
+    kpis: {
+      total: currentTokens.length,
+      mode: currentMode
+    }
+  };
+  const jsonStr = JSON.stringify(exportPayload, null, 2);
+  if (window.electronAPI && window.electronAPI.exportFile) {
+    const res = await window.electronAPI.exportFile(`cockpit_snapshot_${Date.now()}.json`, jsonStr, 'json');
+    if (res && res.ok) showToast(`Archivo exportado a: ${res.path}`);
+  } else {
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cockpit_export_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Descarga de snapshot iniciada");
+  }
+}
+
+async function startTelemetryPolling() {
+  async function poll() {
+    try {
+      if (window.electronAPI && window.electronAPI.getSystemTelemetry) {
+        const telem = await window.electronAPI.getSystemTelemetry();
+        const cpuEl = document.getElementById("top-cpu");
+        const ramEl = document.getElementById("top-ram");
+        if (cpuEl && telem.memPercent !== undefined) {
+          cpuEl.textContent = `${telem.cpuCount}c`;
+        }
+        if (ramEl && telem.usedMemMb !== undefined) {
+          ramEl.textContent = `${(telem.usedMemMb / 1024).toFixed(1)}/${(telem.totalMemMb / 1024).toFixed(0)}GB`;
+        }
+      } else {
+        const res = await fetch("/api/system/telemetry");
+        if (res.ok) {
+          const t = await res.json();
+          if (t.ok) {
+            const cpuEl = document.getElementById("top-cpu");
+            const ramEl = document.getElementById("top-ram");
+            if (cpuEl) cpuEl.textContent = `${t.cpu_percent.toFixed(0)}%`;
+            if (ramEl) ramEl.textContent = `${(t.ram_used_mb / 1024).toFixed(1)}GB`;
+          }
+        }
+      }
+    } catch (e) {
+      // Telemetría pasiva silenciosa
+    }
+  }
+  poll();
+  setInterval(poll, 4000);
+}
+
+// Global hotkeys listener
+window.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && (e.key === "k" || e.key === "K")) {
+    e.preventDefault();
+    toggleCommandPalette();
+  } else if (e.ctrlKey && (e.key === "j" || e.key === "J")) {
+    e.preventDefault();
+    toggleAiDrawer();
+  } else if (e.key === "F1" || (e.key === "?" && !["INPUT", "TEXTAREA"].includes(e.target.tagName))) {
+    e.preventDefault();
+    toggleShortcutsModal();
+  } else if (e.key === "Escape") {
+    if (commandPaletteOpen) toggleCommandPalette();
+    if (shortcutsModalOpen) toggleShortcutsModal();
+  }
+});
+
+// Bind Electron IPC events if available
+if (window.electronAPI) {
+  if (window.electronAPI.onTriggerCommandPalette) window.electronAPI.onTriggerCommandPalette(() => toggleCommandPalette());
+  if (window.electronAPI.onTriggerAiCopilot) window.electronAPI.onTriggerAiCopilot(() => toggleAiDrawer());
+  if (window.electronAPI.onTriggerShortcuts) window.electronAPI.onTriggerShortcuts(() => toggleShortcutsModal());
+}
 </script>
+
+<!-- COMMAND PALETTE MODAL -->
+<div class="cmd-palette-backdrop" id="cmd-palette-backdrop" onclick="if(event.target===this) toggleCommandPalette()">
+  <div class="cmd-palette-box">
+    <div class="cmd-input-wrap">
+      <span style="font-size:16px; color:var(--accent);">⚡</span>
+      <input type="text" id="cmd-palette-input" class="cmd-input" placeholder="Escribe un comando o busca acción... (/boost, /evolve, radar, exportar)" oninput="filterCommandPalette(this.value)" onkeydown="if(event.key==='Enter'){ const f = document.querySelector('.cmd-item.selected'); if(f) f.click(); }" />
+      <kbd style="color:var(--dim); font-size:10px;">ESC para cerrar</kbd>
+    </div>
+    <div class="cmd-list" id="cmd-palette-list"></div>
+  </div>
+</div>
+
+<!-- SLIDE-OVER AI CO-PILOT DRAWER -->
+<div class="ai-drawer" id="ai-slide-drawer">
+  <div class="ai-drawer-header">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span style="font-size:16px;">✨</span>
+      <span style="font-weight:700; color:#fff;">Copiloto IA en Vivo</span>
+      <span class="brand-tag">Gemini / Claude / OpenRouter</span>
+    </div>
+    <button class="filter-chip" onclick="toggleAiDrawer()" style="padding:2px 8px; font-weight:700;" aria-label="Cerrar panel IA">✕</button>
+  </div>
+  <div class="ai-drawer-body" id="ai-drawer-stream">
+    <div class="ai-chat-msg bot">
+      <b>✨ Copiloto Cuantitativo Activo</b><br/>
+      <span>Puedo ayudarte a auditar tokens del radar, diagnosticar vetos por cabal o recalibrar modelos sin salir de la pantalla actual.</span>
+      <div style="margin-top:6px; font-size:10px; color:var(--accent);">
+        Usa atajos rápidos: <code>Ctrl+J</code> para ocultarme o mostrarme.
+      </div>
+    </div>
+  </div>
+  <div class="ai-chips-bar" style="padding:6px 12px; gap:4px; flex-wrap:wrap; background:#080d16; border-top:1px solid var(--border);">
+    <button class="filter-chip" onclick="executeCockpitCommand('audit_selected')">🔍 Auditar Seleccionado</button>
+    <button class="filter-chip" onclick="openAiDrawerWithPrompt('/boost')">⚡ /boost ML</button>
+    <button class="filter-chip" onclick="openAiDrawerWithPrompt('/evolve')">🧬 /evolve</button>
+    <button class="filter-chip" onclick="openAiDrawerWithPrompt('/shadow')">🔮 /shadow</button>
+    <button class="filter-chip" onclick="openAiDrawerWithPrompt('/goal eval')">🎯 Metas</button>
+  </div>
+  <div class="ai-drawer-footer">
+    <div style="display:flex; gap:8px;">
+      <input type="text" id="ai-drawer-input" class="ai-input" placeholder="Pregunta a la IA o escribe /boost, /evolve, /goal..." onkeydown="if(event.key==='Enter') sendAiDrawerMessage()" />
+      <button class="btn-submit-order" style="padding:6px 14px; margin:0;" onclick="sendAiDrawerMessage()">Enviar</button>
+    </div>
+  </div>
+</div>
+
+<!-- KEYBOARD SHORTCUTS MODAL -->
+<div class="shortcuts-backdrop" id="shortcuts-modal" onclick="if(event.target===this) toggleShortcutsModal()">
+  <div class="shortcuts-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <h3 style="color:#fff; display:flex; align-items:center; gap:8px;"><span>⌨️</span> Atajos de Teclado de la Terminal</h3>
+      <button class="filter-chip" onclick="toggleShortcutsModal()" style="padding:2px 8px;" aria-label="Cerrar atajos">✕</button>
+    </div>
+    <div class="shortcut-row"><span>Barra de Comandos Rápidos</span><kbd>Ctrl + K</kbd></div>
+    <div class="shortcut-row"><span>Abrir / Ocultar Copiloto IA Lateral</span><kbd>Ctrl + J</kbd></div>
+    <div class="shortcut-row"><span>Botón de Pánico (Cierre Inmediato de Posiciones)</span><kbd style="color:var(--bad);">Ctrl + Shift + P</kbd></div>
+    <div class="shortcut-row"><span>Alternar Auto-Sniper Bot (Pausar/Activar)</span><kbd>Ctrl + Shift + B</kbd></div>
+    <div class="shortcut-row"><span>Abrir Consola de Desarrollo (DevTools)</span><kbd>Ctrl + Shift + I</kbd></div>
+    <div class="shortcut-row"><span>Recargar Datos de la Terminal</span><kbd>F5 / Ctrl + R</kbd></div>
+    <div class="shortcut-row"><span>Modo Pantalla Completa</span><kbd>F11</kbd></div>
+    <div class="shortcut-row"><span>Mostrar este Panel de Atajos</span><kbd>F1 o ?</kbd></div>
+  </div>
+</div>
 </body>
 </html>

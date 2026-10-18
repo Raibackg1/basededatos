@@ -1,5 +1,5 @@
 """
-Tests de las olas de mejora aplicadas (informe teorico D:/hjh + D:/memecoin66):
+Tests de las olas de mejora aplicadas (informe teorico $PUMPSCOPE_DB + $STRATEGY_MEMORY):
 
 - Ola 1: purged split temporal (purge_gap).
 - Ola 2: modelo de costes reales CostModel + etiqueta win_real_net.

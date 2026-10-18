@@ -22,12 +22,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from detector.branch_gate import BranchGate, veto_if_disabled
 from detector.live_store import LiveStore
 from detector.master_signal import MasterSignalDecision
+from detector.metrics_registry import claimed_wr, claimed_pf
 
 
 def _dec(branch: str, admitted: bool = True) -> MasterSignalDecision:
     return MasterSignalDecision(
         admitted=admitted, branch=branch, confidence=0.7,
-        expected_winrate=0.6, expected_profit_factor=2.0,
+        expected_winrate=claimed_wr("test_gate_wr"), expected_profit_factor=claimed_pf("test_gate_pf"),
         veto_reason=None, metrics={})
 
 

@@ -9,7 +9,7 @@ Compara:
 import sqlite3
 import os
 
-DB_PATH = r"D:\hjh\pumpscope\db\custom.db"
+DB_PATH = os.environ.get("PUMPSCOPE_DB", "custom.db")
 
 def run_benchmark():
     if not os.path.exists(DB_PATH):

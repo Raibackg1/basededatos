@@ -23,7 +23,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 DEXSCREENER_TOKENS = "https://api.dexscreener.com/latest/dex/tokens/"
 DEXSCREENER_PROFILES = "https://api.dexscreener.com/token-profiles/latest/v1"
-_USER_AGENT = "pumpfun-cockpit/1.0 (+local paper-forward, read-only)"
+DEXSCREENER_BOOSTS = "https://api.dexscreener.com/token-boosts/latest/v1"
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
 
 
 def _num(v: Any) -> Optional[float]:
@@ -57,6 +61,7 @@ class MarketFeed:
         min_interval_s: float = 0.25,
         timeout_s: float = 10.0,
         max_cache: int = 4096,
+        stale_max_s: float = 900.0,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -71,11 +76,53 @@ class MarketFeed:
         # (snapshot None) para no martillar la fuente con mints sin par.
         self._cache: Dict[str, tuple] = {}
         self._last_call = 0.0
+        # Backoff ante HTTP 429: la API pública de DexScreener corta el grifo si
+        # se martillea. Sin esto el tablero de tokens se vaciaba en silencio.
+        self.stale_max_s = float(stale_max_s)
+        self._cooldown_until = 0.0
+        self._limit_streak = 0
+        self.rate_limited = False
+        self.skipped = 0
+        self._last_good: List[Dict[str, Any]] = []
+        self._last_good_ts = 0.0
         self.calls = 0
         self.hits = 0
         self.misses = 0
         self.errors = 0
         self.last_error: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Control de caudal (429 -> cooldown exponencial, sin martillear)
+    # ------------------------------------------------------------------
+    def _register_rate_limit(self, exc: Optional[BaseException] = None) -> None:
+        """Abre (o extiende) la ventana de cooldown tras un 429.
+
+        Respeta ``Retry-After`` si la fuente lo envía; en su defecto aplica
+        retroceso exponencial acotado a 120 s.
+        """
+        self._limit_streak += 1
+        retry_after: Optional[float] = None
+        headers = getattr(exc, "headers", None)
+        try:
+            if headers is not None:
+                ra = headers.get("Retry-After")
+                if ra is not None:
+                    retry_after = max(0.0, float(ra))
+        except (TypeError, ValueError):
+            retry_after = None
+        delay = retry_after if retry_after is not None else \
+            min(120.0, 2.0 * (2 ** min(self._limit_streak - 1, 6)))
+        self._cooldown_until = self._clock() + delay
+        self.rate_limited = True
+
+    def cooldown_s(self) -> float:
+        """Segundos de cooldown restantes (0.0 si la fuente está disponible)."""
+        return max(0.0, self._cooldown_until - self._clock())
+
+    def _record_success(self) -> None:
+        self._limit_streak = 0
+        self.rate_limited = False
+        self._cooldown_until = 0.0
 
     # ------------------------------------------------------------------
     # Transporte
@@ -91,8 +138,15 @@ class MarketFeed:
             return None
 
     def _get_json(self, url: str) -> Optional[Any]:
-        """GET JSON con rate-limit cortés. Devuelve None ante cualquier fallo."""
+        """GET JSON con rate-limit cortés. Devuelve None ante cualquier fallo.
+
+        Durante un cooldown por 429 NO se llama a la red (se cuenta en
+        ``skipped``): insistir solo alarga el bloqueo de la fuente.
+        """
         now = self._clock()
+        if now < self._cooldown_until:
+            self.skipped += 1
+            return None
         wait = self.min_interval_s - (now - self._last_call)
         if wait > 0:
             self._sleep(wait)
@@ -102,12 +156,20 @@ class MarketFeed:
         getter = self._http_get or self._default_http_get
         try:
             data = getter(url)
+        except urllib.error.HTTPError as exc:
+            self.errors += 1
+            self.last_error = f"HTTPError: {exc}"
+            if getattr(exc, "code", 0) == 429:
+                self._register_rate_limit(exc)
+            return None
         except Exception as exc:  # transporte inyectado defectuoso
             self.errors += 1
             self.last_error = f"{type(exc).__name__}: {exc}"
             return None
         if data is None:
             self.errors += 1
+        else:
+            self._record_success()
         return data
 
     # ------------------------------------------------------------------
@@ -147,15 +209,28 @@ class MarketFeed:
         if mc is None or mc <= 0:
             return None
         base = pair.get("baseToken") or {}
+        txns = pair.get("txns") or {}
+        m5_tx = txns.get("m5") or {}
+        vol = pair.get("volume") or {}
+        p_chg = pair.get("priceChange") or {}
         return {
             "mint": mint,
+            "chain_id": str(pair.get("chainId") or "solana"),
+            "dex_id": str(pair.get("dexId") or ""),
             "market_cap_usd": mc,
             "liquidity_usd": _num((pair.get("liquidity") or {}).get("usd")) or 0.0,
             "price_usd": _num(pair.get("priceUsd")) or 0.0,
             "symbol": str(base.get("symbol") or ""),
             "name": str(base.get("name") or ""),
-            "price_change_5m": _num((pair.get("priceChange") or {}).get("m5")) or 0.0,
-            "volume_5m_usd": _num((pair.get("volume") or {}).get("m5")) or 0.0,
+            "price_change_5m": _num(p_chg.get("m5")) or 0.0,
+            "price_change_1h": _num(p_chg.get("h1")) or 0.0,
+            "volume_5m_usd": _num(vol.get("m5")) or 0.0,
+            "volume_1h_usd": _num(vol.get("h1")) or 0.0,
+            "volume_24h_usd": _num(vol.get("h24")) or 0.0,
+            "buys_m5": int(_num(m5_tx.get("buys")) or 0),
+            "sells_m5": int(_num(m5_tx.get("sells")) or 0),
+            "pair_created_at": int(_num(pair.get("pairCreatedAt")) or 0),
+            "raw_pair": pair,
         }
 
     def _snapshot_cached(self, mint: str) -> Optional[Dict[str, Any]]:
@@ -188,19 +263,32 @@ class MarketFeed:
         """Snapshot real del token (mc, liquidez, símbolo, volumen 5m)."""
         return self._snapshot_cached(mint)
 
-    def discover_new_tokens(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def discover_new_tokens(self, limit: int = 10, allow_stale: bool = True) -> List[Dict[str, Any]]:
         """Tokens Solana recientes con market cap real. ``[]`` si no hay fuente.
 
-        Usa los perfiles más recientes de DexScreener (sin key) y enriquece cada
-        uno con su snapshot real. Se descartan los tokens sin par/market cap.
+        Usa los perfiles más recientes y boosts de DexScreener (sin key) y enriquece
+        cada uno con su snapshot real. Se descartan los tokens sin par/market cap.
+
+        Si la fuente está bloqueada (429) o no responde, devuelve el **último set
+        bueno conocido** (Real, no inventado) marcado con ``_source_stale=True`` y
+        ``_source_ts``, siempre que no supere ``stale_max_s``. Nunca fabrica
+        tokens: si no hay recuerdo válido, devuelve ``[]``.
         """
-        payload = self._get_json(DEXSCREENER_PROFILES)
-        if not isinstance(payload, list):
-            return []
         limit = max(1, int(limit))
         out: List[Dict[str, Any]] = []
         seen: set = set()
-        for item in payload:
+
+        # 1. Perfiles recientes
+        profiles = self._get_json(DEXSCREENER_PROFILES)
+        candidates: List[Any] = list(profiles) if isinstance(profiles, list) else []
+
+        # 2. Si faltan candidatos hasta alcanzar limit, complementar con token-boosts
+        if len(candidates) < limit * 2 and self._http_get is None:
+            boosts = self._get_json(DEXSCREENER_BOOSTS)
+            if isinstance(boosts, list):
+                candidates.extend(boosts)
+
+        for item in candidates:
             if len(out) >= limit:
                 break
             if not isinstance(item, dict) or item.get("chainId") != "solana":
@@ -213,6 +301,18 @@ class MarketFeed:
             if snap is None:
                 continue
             out.append(snap)
+
+        now = self._clock()
+        if out:
+            self._last_good = list(out)
+            self._last_good_ts = now
+            return out
+        # Sin datos frescos: se devuelve el recuerdo REAL si sigue vigente,
+        # con marca explícita para que la UI diga "datos de hace Ns".
+        if (allow_stale and self._last_good
+                and (now - self._last_good_ts) <= self.stale_max_s):
+            return [dict(row, _source_stale=True, _source_ts=self._last_good_ts)
+                    for row in self._last_good[:limit]]
         return out
 
     def health(self) -> Dict[str, Any]:
@@ -225,4 +325,9 @@ class MarketFeed:
             "errors": self.errors,
             "cache_size": len(self._cache),
             "last_error": self.last_error,
+            "rate_limited": bool(self.rate_limited and self.cooldown_s() > 0),
+            "cooldown_s": round(self.cooldown_s(), 1),
+            "skipped": self.skipped,
+            "last_good_age_s": (round(self._clock() - self._last_good_ts, 1)
+                                if self._last_good_ts else None),
         }
