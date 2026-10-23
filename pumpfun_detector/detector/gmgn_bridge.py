@@ -35,14 +35,24 @@ from .ai_quant_model import AIQuantModel
 from .auto_evolution import AutoEvolutionEngine
 from .gmgn_dossier_scanner import GMGNDossierScanner
 
+# Resolución de DB SIN depender del cwd (bug-clase: os.environ.get con default
+# "custom.db" relativo elegía base distinta según quién lanzara el proceso).
+# Mismo orden que build_state: explicit -> $PUMPSCOPE_DB -> canónica -> candidatos.
+from cockpit.snapshot import resolve_db_path as _resolve_pumpscope_db
+
 logger = logging.getLogger(__name__)
+
+# Los patrones de classify_pattern son reglas de microestructura, NO mediciones:
+# no existe validacion OOS (N>=30, oos_pass) que respalde ningun EV ni confianza.
+# Por eso viajan como N/D en vez de las cifras historicas (+26.8%, 94.2, ...).
+EV_UNVERIFIED = "N/D (prior no verificado)"
 
 
 @dataclass
 class PatternDetection:
     pattern_id: str
     label: str
-    confidence_pct: float
+    confidence_pct: Optional[float]  # None = prior no verificado (sin medicion OOS)
     bias: str  # "BULLISH", "BEARISH_VETO", "NEUTRAL"
     expected_ev: str
     causal_trigger: str
@@ -661,77 +671,77 @@ class GMGNBridge:
             return PatternDetection(
                 pattern_id="RUG_PULL_SIGNATURE",
                 label="🚨 Riesgo Crítico de Rug Pull",
-                confidence_pct=96.4,
+                confidence_pct=None,
                 bias="BEARISH_VETO",
-                expected_ev="-35.0%",
+                expected_ev=EV_UNVERIFIED,
                 causal_trigger=f"Rug ratio {rug_ratio:.2f} excede el límite de seguridad (0.30)",
             )
         if top10 > 30.0:
             return PatternDetection(
                 pattern_id="CABAL_ACCUMULATION_TRAP",
                 label="🔴 Trampa de Cabal Concentrado",
-                confidence_pct=92.1,
+                confidence_pct=None,
                 bias="BEARISH_VETO",
-                expected_ev="-33.5%",
+                expected_ev=EV_UNVERIFIED,
                 causal_trigger=f"Top 10 billeteras coludidas retienen {top10:.1f}% (> 30%)",
             )
         if sniper_pct > 25.0:
             return PatternDetection(
                 pattern_id="BLOCK0_SNIPER_OVERHANG",
                 label="⚠️ Sobrecarga Snipers Bloque 0",
-                confidence_pct=88.5,
+                confidence_pct=None,
                 bias="BEARISH_VETO",
-                expected_ev="-31.0%",
+                expected_ev=EV_UNVERIFIED,
                 causal_trigger=f"Snipers controlan {sniper_pct:.1f}% (> 25%). Venta masiva inminente",
             )
         if dev_pct > 1.50:
             return PatternDetection(
                 pattern_id="DEV_DUMP_RISK",
                 label="⚠️ Inventario Dev Peligroso",
-                confidence_pct=89.0,
+                confidence_pct=None,
                 bias="BEARISH_VETO",
-                expected_ev="-35.0%",
+                expected_ev=EV_UNVERIFIED,
                 causal_trigger=f"Dev retiene {dev_pct:.1f}% (> 1.50%). Riesgo de drenaje de pool",
             )
         if smart_cnt >= 2:
             return PatternDetection(
                 pattern_id="SMART_MONEY_CONFLUENCE",
                 label="🟢 Confluencia Smart Money",
-                confidence_pct=94.2,
+                confidence_pct=None,
                 bias="BULLISH",
-                expected_ev="+26.8%",
+                expected_ev=EV_UNVERIFIED,
                 causal_trigger=f"{smart_cnt} billeteras de Smart Money acumulando simultáneamente",
             )
         if smart_cnt == 1 and top10 < 20.0:
             return PatternDetection(
                 pattern_id="SMART_ACCUMULATOR",
                 label="🟢 Acumulación Ballena Solitaria",
-                confidence_pct=85.0,
+                confidence_pct=None,
                 bias="BULLISH",
-                expected_ev="+19.4%",
+                expected_ev=EV_UNVERIFIED,
                 causal_trigger="Ballena verificada con WR > 60% entrando con supply distribuido",
             )
         if mc <= 5000.0 and liq >= 1500.0:
             return PatternDetection(
                 pattern_id="EXPANSION_BREAKOUT",
                 label="🔵 Expansión Orgánica Temprana",
-                confidence_pct=81.1,
+                confidence_pct=None,
                 bias="BULLISH",
-                expected_ev="+15.0%",
+                expected_ev=EV_UNVERIFIED,
                 causal_trigger="Ratio Liquidez/MC superior a 30% en micro-cap sin concentración",
             )
         return PatternDetection(
             pattern_id="UNCONFIRMED_VOLATILITY",
             label="⚪ Flujo Sin Confluencia Confirmada",
-            confidence_pct=50.0,
+            confidence_pct=None,
             bias="NEUTRAL",
-            expected_ev="0.0%",
+            expected_ev=EV_UNVERIFIED,
             causal_trigger="Sin confirmación simultánea de Smart Money ni patrones de ruptura",
         )
 
     def _load_wallets_from_db(self) -> List[Dict[str, Any]]:
         db_paths = [
-            os.environ.get("PUMPSCOPE_DB", "custom.db"),
+            _resolve_pumpscope_db().get("path") or "custom.db",
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo_pumpfun.db"),
         ]
         for path in db_paths:
@@ -778,8 +788,11 @@ class GMGNBridge:
             if data and isinstance(data, dict):
                 raw_wallets = data.get("wallets", data.get("list", []))
 
-        # Cargar de base de datos canónica si está disponible
-        if not raw_wallets:
+        # Billeteras reales ($PUMPSCOPE_DB -> canónica -> candidatos): SOLO en
+        # producción. En demo_mode explícito no se consulta la DB para que el
+        # modo demo sea hermético en cualquier host (si no, una DB real con
+        # WalletProfile silenciaría el catálogo de demo).
+        if not raw_wallets and not self.demo_mode:
             raw_wallets = self._load_wallets_from_db()
 
         # Catálogo de DEMOSTRACIÓN: solo con demo_mode explícito (tests/offline).
@@ -941,7 +954,7 @@ class GMGNBridge:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         parent_dir = os.path.dirname(base_dir)
         db_paths = [
-            os.environ.get("PUMPSCOPE_DB", "custom.db"),
+            _resolve_pumpscope_db().get("path") or "custom.db",
             os.path.join(base_dir, "demo_pumpfun.db"),
             os.path.join(parent_dir, "demo_pumpfun.db"),
             os.path.join(base_dir, "cockpit", "runtime", "cockpit_forward.db"),
@@ -1161,14 +1174,25 @@ class GMGNBridge:
             smart_cnt = int(t.get("smart_buyers_count", 0))
             smart_tags = t.get("smart_buyers_tags", [])
             rug = float(t.get("rug_ratio", 0.0))
-            top10 = float(t.get("top10_concentration_pct", 0.0))
-            dev_pct = float(t.get("dev_balance_pct", 0.0))
-            sniper_pct = float(t.get("sniper_ratio_pct", 0.0))
+            top10_opt = _stage_float(t.get("top10_concentration_pct"))
+            dev_opt = _stage_float(t.get("dev_balance_pct"))
+            sniper_opt = _stage_float(t.get("sniper_ratio_pct"))
             chg5m = float(t.get("price_change_5m", 0.0))
             vol5m = float(t.get("volume_5m_usd", 0.0))
             spark = t.get("sparkline") or []
             metrics_known = bool(t.get("metrics_known", True))
-            bundler_pct = float(t.get("bundler_pct", sniper_pct if sniper_pct >= 25.0 else 0.0))
+            # Anti-falacia: una métrica crítica ausente degrada a UNVERIFIED
+            # (fail-closed). Los ceros solo evitan romper la firma numérica.
+            if top10_opt is None or dev_opt is None:
+                metrics_known = False
+            top10 = top10_opt or 0.0
+            dev_pct = dev_opt or 0.0
+            sniper_pct = sniper_opt or 0.0
+            bundler_opt = _stage_float(t.get("bundler_pct"))
+            bundler_pct = (
+                bundler_opt if bundler_opt is not None
+                else (sniper_pct if sniper_pct >= 25.0 else 0.0)
+            )
             wash_flag = bool(t.get("wash_trading_flag", False))
             clone_flag = bool(t.get("clone_factory_flag", False))
             dev_factory_flag = bool(t.get("dev_factory_flag", False))

@@ -40,11 +40,17 @@ CREATE TABLE IF NOT EXISTS token_dossiers (
  market_cap_usd REAL NOT NULL DEFAULT 0.0,
  liquidity_usd REAL NOT NULL DEFAULT 0.0,
  holder_count INTEGER NOT NULL DEFAULT 0,
- top10_raw_pct REAL NOT NULL DEFAULT 0.0,
- top10_float_pct REAL NOT NULL DEFAULT 0.0,
- dev_balance_pct REAL NOT NULL DEFAULT 0.0,
- bundler_pct REAL NOT NULL DEFAULT 0.0,
- sniper_pct REAL NOT NULL DEFAULT 0.0,
+ top10_raw_pct REAL,
+ top10_float_pct REAL,
+ top10_source TEXT,
+ top10_flag TEXT,
+ dev_balance_pct REAL,
+ dev_balance_known INTEGER NOT NULL DEFAULT 0,
+ bundler_pct REAL,
+ bundler_source TEXT,
+ sniper_pct REAL,
+ sniper_source TEXT,
+ sniper_is_proxy INTEGER NOT NULL DEFAULT 0,
  bundler_flag INTEGER NOT NULL DEFAULT 0,
  wash_trading_flag INTEGER NOT NULL DEFAULT 0,
  avg_tx_m5_usd REAL NOT NULL DEFAULT 0.0,
@@ -55,9 +61,10 @@ CREATE TABLE IF NOT EXISTS token_dossiers (
  avatar_reused_count INTEGER NOT NULL DEFAULT 1,
  creator_address TEXT,
  creator_funder TEXT,
- dev_total_launches INTEGER NOT NULL DEFAULT 0,
- dev_graduated_count INTEGER NOT NULL DEFAULT 0,
- dev_best_ath_mc_usd REAL NOT NULL DEFAULT 0.0,
+ dev_total_launches INTEGER,
+ dev_graduated_count INTEGER,
+ dev_best_ath_mc_usd REAL,
+ dev_history_known INTEGER NOT NULL DEFAULT 0,
  dev_factory_flag INTEGER NOT NULL DEFAULT 0,
  composite_dd_score REAL NOT NULL DEFAULT 0.0,
  admitted INTEGER NOT NULL DEFAULT 0,
@@ -168,6 +175,35 @@ def _opt_float(val: Any) -> Optional[float]:
     return out
 
 
+def _opt_int(val: Any) -> Optional[int]:
+    """Convierte a int o None (misma ley: ausencia != cero)."""
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        return int(float(val))
+    except (TypeError, ValueError):
+        return None
+
+
+# Columnas de medición que DEBEN poder expresar "sin dato" (NULL).
+_DOSSIER_NULLABLE = (
+    "top10_raw_pct", "top10_float_pct", "dev_balance_pct",
+    "bundler_pct", "sniper_pct",
+    "dev_total_launches", "dev_graduated_count", "dev_best_ath_mc_usd",
+)
+
+# Procedencia explícita: qué se midió, con qué método, y qué es solo un proxy.
+_DOSSIER_PROVENANCE = (
+    ("top10_source", "TEXT"),
+    ("top10_flag", "TEXT"),
+    ("dev_balance_known", "INTEGER NOT NULL DEFAULT 0"),
+    ("bundler_source", "TEXT"),
+    ("sniper_source", "TEXT"),
+    ("sniper_is_proxy", "INTEGER NOT NULL DEFAULT 0"),
+    ("dev_history_known", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
 class LiveStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -220,6 +256,93 @@ class LiveStore:
         for name, typ in {"mfe_pct": "REAL", "mae_pct": "REAL"}.items():
             if name not in oc_existing:
                 self._con.execute(f"ALTER TABLE live_outcomes ADD COLUMN {name} {typ}")
+        self._migrate_dossiers_nullable()
+
+    def _migrate_dossiers_nullable(self) -> None:
+        """Permite NULL donde el dato puede no existir y añade procedencia.
+
+        SQLite no elimina ``NOT NULL`` con ``ALTER``: una tabla legacy se
+        reconstruye copiando las filas tal cual (jamás se inventan valores).
+        """
+        info = self._con.execute("PRAGMA table_info(token_dossiers)").fetchall()
+        if not info:
+            return
+        cols = {r[1]: r for r in info}
+        needs_rebuild = any(
+            name in cols and int(cols[name][3] or 0) != 0 for name in _DOSSIER_NULLABLE
+        )
+        if needs_rebuild:
+            self._rebuild_dossiers_nullable(info)
+            return
+        for name, decl in _DOSSIER_PROVENANCE:
+            if name not in cols:
+                self._con.execute(f"ALTER TABLE token_dossiers ADD COLUMN {name} {decl}")
+        self._con.commit()
+
+    def _rebuild_dossiers_nullable(self, info: List[Any]) -> None:
+        old_names = [r[1] for r in info]
+        decl: List[str] = []
+        for r in info:
+            name = r[1]
+            typ = r[2] or "TEXT"
+            notnull = int(r[3] or 0)
+            dflt = r[4]
+            pk = int(r[5] or 0)
+            if name in _DOSSIER_NULLABLE:
+                notnull = 0
+            parts = [name, typ]
+            if pk:
+                parts.append("PRIMARY KEY")
+            elif notnull:
+                parts.append("NOT NULL")
+            if dflt is not None:
+                parts.append(f"DEFAULT {dflt}")
+            decl.append(" ".join(parts))
+        for name, ddl in _DOSSIER_PROVENANCE:
+            if name not in old_names:
+                decl.append(f"{name} {ddl}")
+        tmp = "token_dossiers__nullable"
+        select_cols = ", ".join(old_names)
+        try:
+            self._con.execute(f"DROP TABLE IF EXISTS {tmp}")
+            self._con.execute(f"CREATE TABLE {tmp} ({', '.join(decl)})")
+            self._con.execute(
+                f"INSERT INTO {tmp} ({select_cols}) SELECT {select_cols} FROM token_dossiers"
+            )
+            self._con.execute("DROP TABLE token_dossiers")
+            self._con.execute(f"ALTER TABLE {tmp} RENAME TO token_dossiers")
+            if "top10_source" not in old_names:
+                # Filas legacy: su procedencia real es desconocida. Se etiqueta
+                # como no verificada, jamás como medición limpia.
+                self._con.execute(
+                    "UPDATE token_dossiers SET top10_source = CASE "
+                    "WHEN top10_float_pct IS NULL THEN 'unavailable' ELSE 'legacy_unverified' END"
+                )
+                self._con.execute(
+                    "UPDATE token_dossiers SET bundler_source = CASE "
+                    "WHEN bundler_pct IS NULL THEN 'unavailable' ELSE 'legacy_unverified' END"
+                )
+                self._con.execute(
+                    "UPDATE token_dossiers SET sniper_source = CASE "
+                    "WHEN sniper_pct IS NULL THEN 'unavailable' ELSE 'legacy_unverified' END"
+                )
+                self._con.execute(
+                    "UPDATE token_dossiers SET sniper_is_proxy = 1 "
+                    "WHERE sniper_pct IS NOT NULL AND bundler_pct IS NOT NULL "
+                    "AND ABS(sniper_pct - bundler_pct) < 1e-9"
+                )
+                self._con.execute("UPDATE token_dossiers SET dev_history_known = 0")
+                self._con.execute("UPDATE token_dossiers SET dev_balance_known = 0")
+            self._con.executescript(
+                "CREATE INDEX IF NOT EXISTS idx_dossiers_updated ON token_dossiers(updated_ts DESC);"
+                "CREATE INDEX IF NOT EXISTS idx_dossiers_verdict ON token_dossiers(verdict);"
+            )
+            self._con.commit()
+        except Exception as exc:
+            self._con.rollback()
+            raise RuntimeError(
+                f"Migración de token_dossiers a columnas NULL falló: {exc}"
+            ) from exc
 
     def record_decision(self, mint: str, feats: Dict[str, Any], decision: Any,
                         ts: Optional[float] = None, provenance: Optional[Dict[str, Any]] = None) -> int:
@@ -496,21 +619,54 @@ class LiveStore:
         ).fetchone()
         first_seen = float(existing["first_seen_ts"]) if existing else now
         veto_reasons = dossier.get("veto_reasons") or []
+        top10_raw = _opt_float(dossier.get("top10_raw_pct"))
+        top10_float = _opt_float(dossier.get("top10_float_pct"))
+        dev_balance = _opt_float(dossier.get("dev_balance_pct"))
+        bundler = _opt_float(dossier.get("bundler_pct"))
+        sniper = _opt_float(dossier.get("sniper_pct"))
+        launches = _opt_int(dossier.get("dev_total_launches"))
+        graduated = _opt_int(dossier.get("dev_graduated_count"))
+        best_ath = _opt_float(dossier.get("dev_best_ath_mc_usd"))
+
+        def _source(key: str, measured: bool, fallback: str) -> str:
+            explicit = dossier.get(key)
+            if explicit:
+                return str(explicit)
+            return fallback if measured else "unavailable"
+
+        top10_source = _source("top10_source", top10_float is not None, "legacy_unverified")
+        bundler_source = _source("bundler_source", bundler is not None, "legacy_unverified")
+        sniper_source = _source("sniper_source", sniper is not None, "legacy_unverified")
+        sniper_is_proxy = bool(dossier.get("sniper_is_proxy"))
+        if (not sniper_is_proxy and sniper is not None and bundler is not None
+                and abs(sniper - bundler) < 1e-9):
+            sniper_is_proxy = True
+            if not dossier.get("sniper_source"):
+                sniper_source = "proxy:bundler_uniform_cluster"
+        dev_balance_known = bool(
+            dossier.get("dev_balance_known", dev_balance is not None)
+        )
+        dev_history_known = bool(
+            dossier.get("dev_history_known",
+                        any(v is not None for v in (launches, graduated, best_ath)))
+        )
         self._con.execute(
             """
             INSERT OR REPLACE INTO token_dossiers (
                 mint, chain, symbol, name, first_seen_ts, updated_ts,
                 market_cap_usd, liquidity_usd, holder_count,
-                top10_raw_pct, top10_float_pct, dev_balance_pct,
-                bundler_pct, sniper_pct, bundler_flag,
-                wash_trading_flag, avg_tx_m5_usd,
+                top10_raw_pct, top10_float_pct, top10_source, top10_flag,
+                dev_balance_pct, dev_balance_known,
+                bundler_pct, bundler_source,
+                sniper_pct, sniper_source, sniper_is_proxy,
+                bundler_flag, wash_trading_flag, avg_tx_m5_usd,
                 same_name_count, dead_clones_count, clone_factory_flag,
                 avatar_hash, avatar_reused_count,
                 creator_address, creator_funder, dev_total_launches,
-                dev_graduated_count, dev_best_ath_mc_usd, dev_factory_flag,
-                composite_dd_score, admitted, verdict,
+                dev_graduated_count, dev_best_ath_mc_usd, dev_history_known,
+                dev_factory_flag, composite_dd_score, admitted, verdict,
                 veto_reasons_json, why_price_moves, actionable_playbook, dossier_json
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 mint,
@@ -522,11 +678,17 @@ class LiveStore:
                 float(dossier.get("market_cap_usd") or 0.0),
                 float(dossier.get("liquidity_usd") or 0.0),
                 int(dossier.get("holder_count") or 0),
-                float(dossier.get("top10_raw_pct") or 0.0),
-                float(dossier.get("top10_float_pct") or 0.0),
-                float(dossier.get("dev_balance_pct") or 0.0),
-                float(dossier.get("bundler_pct") or 0.0),
-                float(dossier.get("sniper_pct") or 0.0),
+                top10_raw,
+                top10_float,
+                top10_source,
+                dossier.get("top10_flag"),
+                dev_balance,
+                int(dev_balance_known),
+                bundler,
+                bundler_source,
+                sniper,
+                sniper_source,
+                int(sniper_is_proxy),
                 int(bool(dossier.get("bundler_flag"))),
                 int(bool(dossier.get("wash_trading_flag"))),
                 float(dossier.get("avg_tx_m5_usd") or 0.0),
@@ -537,9 +699,10 @@ class LiveStore:
                 int(dossier.get("avatar_reused_count") or 1),
                 str(dossier.get("creator_address") or "unknown"),
                 str(dossier.get("creator_funder") or ""),
-                int(dossier.get("dev_total_launches") or 0),
-                int(dossier.get("dev_graduated_count") or 0),
-                float(dossier.get("dev_best_ath_mc_usd") or 0.0),
+                launches,
+                graduated,
+                best_ath,
+                int(dev_history_known),
                 int(bool(dossier.get("dev_factory_flag"))),
                 float(dossier.get("composite_dd_score") or 0.0),
                 int(bool(dossier.get("admitted"))),

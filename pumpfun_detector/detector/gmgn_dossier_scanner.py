@@ -54,6 +54,17 @@ def _sf(val: Any, default: float = 0.0) -> float:
         return default
 
 
+def _opt_float(val: Any) -> Optional[float]:
+    """float o ``None``; NaN/Inf también son ausencia de dato."""
+    if val is None or val == "" or isinstance(val, bool):
+        return None
+    try:
+        f = float(val)
+    except (ValueError, TypeError):
+        return None
+    return None if (math.isnan(f) or math.isinf(f)) else f
+
+
 def _si(val: Any, default: int = 0) -> int:
     if val is None or val == "":
         return default
@@ -93,6 +104,35 @@ def compute_avatar_dhash_from_bytes(data: bytes) -> str:
     return f"{bits:016x}"
 
 
+def resolve_top10_float(
+    top10_raw_pct: Optional[float],
+    contract_share_pct: Optional[float],
+) -> tuple[Optional[float], str, Optional[str]]:
+    """Concentración del Top 10 sobre el flotante **real**, o ``None``.
+
+    Reglas anti-falacia:
+    * Sin ``top10_raw_pct`` no hay medición -> ``None``.
+    * Si el flotante negociable es menor al 20% del supply, el cociente es
+      inestable (un error de 1pp en el denominador mueve el resultado >5pp)
+      -> ``None`` con bandera ``TOP10_DENOMINATOR_UNRELIABLE``.
+    * Un porcentaje mayor a 100 es físicamente imposible -> ``None`` con
+      bandera ``TOP10_EXCEEDS_FLOAT`` (jamás se recorta el valor).
+    """
+    raw = _opt_float(top10_raw_pct)
+    contract = _opt_float(contract_share_pct)
+    if raw is None:
+        return None, "unavailable", "TOP10_RAW_UNKNOWN"
+    if contract is None:
+        return None, "unavailable", "TOP10_FLOAT_UNKNOWN"
+    tradeable = 100.0 - contract
+    if tradeable < 20.0:
+        return None, "unavailable", "TOP10_DENOMINATOR_UNRELIABLE"
+    value = round((raw / tradeable) * 100.0, 2)
+    if value > 100.0:
+        return None, "unavailable", "TOP10_EXCEEDS_FLOAT"
+    return value, "measured", None
+
+
 def detect_bundler_and_cluster(
     holders: List[Dict[str, Any]],
     lp_burned_pct: float = 0.0,
@@ -104,16 +144,21 @@ def detect_bundler_and_cluster(
     Esta función detecta el cluster uniforme por su bajísima dispersión relativa (CV < 0.03).
     """
     if not holders:
+        # Sin holders no hay medición: `None` (N/D), nunca 0.0 ni 20.0 inventado.
         return {
-            "top10_raw_pct": 0.0,
-            "top10_float_pct": 0.0,
-            "tradeable_float_pct": 100.0,
-            "contract_or_lp_pct": 0.0,
+            "top10_raw_pct": None,
+            "top10_float_pct": None,
+            "tradeable_float_pct": None,
+            "top10_source": "unavailable",
+            "top10_flag": "HOLDERS_UNKNOWN",
+            "chip_source": "unavailable",
+            "contract_or_lp_pct": None,
             "uniform_cluster_count": 0,
-            "uniform_cluster_sum_pct": 0.0,
-            "estimated_bundler_pct": 0.0,
-            "insider_transfer_pct": 0.0,
-            "holder_entropy": 0.0,
+            "uniform_cluster_sum_pct": None,
+            "estimated_bundler_pct": None,
+            "bundler_source": "unavailable",
+            "insider_transfer_pct": None,
+            "holder_entropy": None,
             "bundler_flag": False,
             "reason": "HOLDERS_UNKNOWN",
         }
@@ -148,11 +193,14 @@ def detect_bundler_and_cluster(
             if h.get("transfer_in") or h.get("is_insider") or h.get("insider"):
                 insider_transfer_pct += pct
 
-    tradeable_float_pct = max(10.0, 100.0 - min(90.0, contract_share))
+    tradeable_float_pct = round(100.0 - contract_share, 2)
     wallet_pcts.sort(reverse=True)
     top10_wallets = wallet_pcts[:10]
     top10_raw_pct = round(sum(top10_wallets), 2)
-    top10_float_pct = round((top10_raw_pct / tradeable_float_pct) * 100.0, 2)
+    # `None` cuando el cociente no es físicamente interpretable (ver helper).
+    top10_float_pct, top10_source, top10_flag = resolve_top10_float(
+        top10_raw_pct, contract_share
+    )
 
     # Detectar cluster uniforme de Bundler (billeteras con saldo casi idéntico >= 0.4%)
     significant = [p for p in wallet_pcts if p >= 0.40]
@@ -191,7 +239,7 @@ def detect_bundler_and_cluster(
             f"BUNDLER_UNIFORM_CLUSTER: {uniform_count} wallets en Top 10 tienen ~{mean_cluster_pct:.2f}% "
             f"idéntico (Bundler estimado: {estimated_bundler_pct:.1f}%)"
         )
-    if top10_float_pct > 30.0:
+    if top10_float_pct is not None and top10_float_pct > 30.0:
         reasons.append(
             f"TOP10_FLOAT_CONCENTRATION: {top10_float_pct:.1f}% del flotante real (> 30%)"
         )
@@ -201,11 +249,17 @@ def detect_bundler_and_cluster(
     return {
         "top10_raw_pct": top10_raw_pct,
         "top10_float_pct": top10_float_pct,
+        "top10_source": top10_source,
+        "top10_flag": top10_flag,
+        "chip_source": "measured",
         "tradeable_float_pct": round(tradeable_float_pct, 2),
         "contract_or_lp_pct": round(contract_share, 2),
         "uniform_cluster_count": uniform_count,
         "uniform_cluster_sum_pct": uniform_sum_pct,
         "estimated_bundler_pct": estimated_bundler_pct,
+        "bundler_source": (
+            "measured:uniform_cluster" if uniform_count >= 3 else "measured:no_uniform_cluster"
+        ),
         "insider_transfer_pct": round(insider_transfer_pct, 2),
         "holder_entropy": round(entropy, 4),
         "bundler_flag": bundler_flag,
@@ -398,43 +452,61 @@ def evaluate_creator_lineage_and_ceiling(
 ) -> Dict[str, Any]:
     """Evalúa el historial del desarrollador (`0/73` en GMGN) y su techo histórico de MC (`$44K`)."""
     stats = dict(dev_stats or {})
-    total_launches = _si(stats.get("total_launches", 0))
-    graduated_count = _si(stats.get("graduated_count", 0))
-    rugs_count = _si(stats.get("rugs_count", 0))
-    best_ath_mc_usd = _sf(stats.get("best_ath_mc_usd", 0.0))
+    # Anti-falacia: historial ausente = None, no "0 lanzamientos" (que activaba
+    # un veto DEV_SERIAL_FACTORY espurio con datos inexistentes).
+    history_known = bool(stats)
+    total_launches = _si(stats.get("total_launches")) if stats.get("total_launches") is not None else None
+    graduated_count = _si(stats.get("graduated_count")) if stats.get("graduated_count") is not None else None
+    rugs_count = _si(stats.get("rugs_count")) if stats.get("rugs_count") is not None else None
+    best_ath_mc_usd = _opt_float(stats.get("best_ath_mc_usd"))
     funder_address = str(stats.get("funder_address", "") or "")
 
     registry_blocked = False
     if creator_registry is not None and creator_address:
         try:
             rep = creator_registry.get_reputation(creator_address)
-            total_launches = max(total_launches, rep.n_launches)
-            graduated_count = max(graduated_count, rep.n_successes)
-            rugs_count = max(rugs_count, rep.n_rugs)
+            history_known = True
+            total_launches = max(total_launches or 0, rep.n_launches)
+            graduated_count = max(graduated_count or 0, rep.n_successes)
+            rugs_count = max(rugs_count or 0, rep.n_rugs)
             registry_blocked = bool(rep.is_blocked)
         except Exception:
             pass
 
-    grad_rate_pct = (graduated_count / total_launches * 100.0) if total_launches > 0 else 0.0
-    mc_vs_ath_pct = (current_mc_usd / best_ath_mc_usd * 100.0) if best_ath_mc_usd > 0 else 0.0
+    grad_rate_pct = (
+        (graduated_count / total_launches * 100.0)
+        if (total_launches is not None and total_launches > 0 and graduated_count is not None)
+        else None
+    )
+    mc_vs_ath_pct = (
+        (current_mc_usd / best_ath_mc_usd * 100.0)
+        if (best_ath_mc_usd is not None and best_ath_mc_usd > 0)
+        else None
+    )
 
     dev_factory_flag = bool(
         registry_blocked
-        or rugs_count >= 2
-        or (total_launches >= 5 and grad_rate_pct < 5.0)
-        or (total_launches >= 3 and graduated_count == 0)
+        or (rugs_count is not None and rugs_count >= 2)
+        or (total_launches is not None and total_launches >= 5
+            and grad_rate_pct is not None and grad_rate_pct < 5.0)
+        or (total_launches is not None and total_launches >= 3 and graduated_count == 0)
     )
     near_dev_ceiling_flag = bool(
-        best_ath_mc_usd > 0.0
+        best_ath_mc_usd is not None
+        and best_ath_mc_usd > 0.0
+        and total_launches is not None
         and total_launches >= 3
         and current_mc_usd >= 0.70 * best_ath_mc_usd
     )
 
     reasons: List[str] = []
     if dev_factory_flag:
+        launches_txt = "N/D" if total_launches is None else str(total_launches)
+        grad_txt = "N/D" if graduated_count is None else str(graduated_count)
+        rate_txt = "N/D" if grad_rate_pct is None else f"{grad_rate_pct:.1f}%"
         reasons.append(
-            f"DEV_SERIAL_FACTORY: creador lanzó {total_launches} tokens con {graduated_count} graduados "
-            f"({grad_rate_pct:.1f}% tasa de éxito)"
+            f"DEV_SERIAL_FACTORY: creador lanzó {launches_txt} tokens con {grad_txt} graduados "
+            f"({rate_txt} tasa de éxito)"
         )
     if near_dev_ceiling_flag:
         reasons.append(
@@ -445,15 +517,18 @@ def evaluate_creator_lineage_and_ceiling(
     return {
         "creator_address": creator_address or "unknown",
         "funder_address": funder_address,
+        "history_known": history_known,
         "total_launches": total_launches,
         "graduated_count": graduated_count,
         "rugs_count": rugs_count,
-        "graduation_rate_pct": round(grad_rate_pct, 2),
-        "best_ath_mc_usd": round(best_ath_mc_usd, 2),
-        "mc_vs_dev_ath_pct": round(mc_vs_ath_pct, 1),
+        "graduation_rate_pct": round(grad_rate_pct, 2) if grad_rate_pct is not None else None,
+        "best_ath_mc_usd": round(best_ath_mc_usd, 2) if best_ath_mc_usd is not None else None,
+        "mc_vs_dev_ath_pct": round(mc_vs_ath_pct, 1) if mc_vs_ath_pct is not None else None,
         "dev_factory_flag": dev_factory_flag,
         "near_dev_ceiling_flag": near_dev_ceiling_flag,
-        "reason": "; ".join(reasons) if reasons else "CREATOR_CLEAN_OR_NEW",
+        "reason": "; ".join(reasons) if reasons else (
+            "CREATOR_CLEAN_OR_NEW" if history_known else "CREATOR_HISTORY_UNKNOWN"
+        ),
     }
 
 
@@ -599,12 +674,12 @@ class TokenDossier:
     buy_tax_pct: float
     sell_tax_pct: float
     # Estructura de Chips & Bundlers
-    top10_raw_pct: float
-    top10_float_pct: float
-    tradeable_float_pct: float
-    dev_balance_pct: float
-    bundler_pct: float
-    sniper_pct: float
+    top10_raw_pct: Optional[float]
+    top10_float_pct: Optional[float]
+    tradeable_float_pct: Optional[float]
+    dev_balance_pct: Optional[float]
+    bundler_pct: Optional[float]
+    sniper_pct: Optional[float]
     uniform_cluster_count: int
     holder_entropy: float
     bundler_flag: bool
@@ -631,9 +706,9 @@ class TokenDossier:
     # Linaje del Creador
     creator_address: str = "unknown"
     creator_funder: str = ""
-    dev_total_launches: int = 0
-    dev_graduated_count: int = 0
-    dev_best_ath_mc_usd: float = 0.0
+    dev_total_launches: Optional[int] = None
+    dev_graduated_count: Optional[int] = None
+    dev_best_ath_mc_usd: Optional[float] = None
     dev_factory_flag: bool = False
     near_dev_ceiling_flag: bool = False
     # Veredicto Compuesto y Explicación Causal
@@ -644,6 +719,14 @@ class TokenDossier:
     why_price_moves: str = ""
     actionable_playbook: str = ""
     metrics_known: bool = True
+    # Procedencia declarada: qué se midió y qué es un proxy (anti-falacias).
+    top10_source: str = "unavailable"
+    top10_flag: Optional[str] = None
+    dev_balance_known: bool = False
+    bundler_source: str = "unavailable"
+    sniper_source: str = "unavailable"
+    sniper_is_proxy: bool = False
+    dev_history_known: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -749,7 +832,7 @@ class GMGNDossierScanner:
         buy_tax_pct = 0.0
         sell_tax_pct = 0.0
         holder_count = 0
-        dev_balance_pct = 0.0
+        dev_balance_pct: Optional[float] = None
         creator_address = "unknown"
         holders_list: List[Dict[str, Any]] = []
         metrics_known = False
@@ -764,7 +847,8 @@ class GMGNDossierScanner:
             buy_tax_pct = round(_sf(goplus_data.get("buy_tax")) * 100.0, 2)
             sell_tax_pct = round(_sf(goplus_data.get("sell_tax")) * 100.0, 2)
             holder_count = _si(goplus_data.get("holder_count"), 0)
-            dev_balance_pct = round(_sf(goplus_data.get("creator_percent")) * 100.0, 2)
+            if goplus_data.get("creator_percent") is not None:
+                dev_balance_pct = round(_sf(goplus_data.get("creator_percent")) * 100.0, 2)
             creator_address = str(goplus_data.get("creator_address") or "unknown")
             holders_list = goplus_data.get("holders") or []
         elif rugcheck_data:
@@ -791,7 +875,7 @@ class GMGNDossierScanner:
                     or (idx == 0 and h_pct >= 28.0 and h_owner != creator_address)
                 )
                 if creator_address != "unknown" and (h_owner == creator_address or h_addr == creator_address):
-                    dev_balance_pct = round(max(dev_balance_pct, h_pct), 2)
+                    dev_balance_pct = round(max(dev_balance_pct or 0.0, h_pct), 2)
                 holders_list.append({
                     "address": h_owner or h_addr,
                     "owner": h_owner,
@@ -807,13 +891,15 @@ class GMGNDossierScanner:
                     has_blacklist = True
                 if "mint authority" in rname:
                     is_renounced = False
+            if creator_address != "unknown" and rc_top:
+                # Top holders medidos + creador identificado: no aparecer = 0% real.
+                dev_balance_pct = round(dev_balance_pct or 0.0, 2)
 
         # 2. Detección de Bundlers y Concentración sobre Flotante
         chip_info = detect_bundler_and_cluster(holders_list)
-        if not holders_list and rugcheck_data:
-            # Si viene de RugCheck summary sin topHolders, evaluar score de riesgo
-            rc_score = _sf(rugcheck_data.get("score_normalised", rugcheck_data.get("score", 0)))
-            chip_info["top10_float_pct"] = min(80.0, rc_score * 2.5) if rc_score > 10 else 20.0
+        # Sin lista de holders NO se sintetiza concentración desde el score de
+        # RugCheck (`score * 2.5` / `20.0`): el valor queda en None y el token
+        # entra en fail-closed con VETO_TOP10_UNVERIFIED.
 
         # 3. Detección de Wash-Trading en Escalera
         wash_info = detect_wash_trading_staircase(
@@ -876,13 +962,21 @@ class GMGNDossierScanner:
         if buy_tax_pct > 5.0 or sell_tax_pct > 5.0:
             score -= 30.0
             veto_reasons.append(f"VETO_HIGH_TAX: impuestos {buy_tax_pct:.1f}% / {sell_tax_pct:.1f}% (> 5%)")
-        if dev_balance_pct > 1.5:
+        if dev_balance_pct is not None and dev_balance_pct > 1.5:
             score -= 30.0
             veto_reasons.append(f"VETO_DEV_HOLDING: dev retiene {dev_balance_pct:.1f}% (> 1.5%)")
+        if chip_info["top10_float_pct"] is None:
+            # Fail-closed: sin concentración medible no se admite nada.
+            score -= 40.0
+            vet_reason = chip_info.get("top10_flag") or "HOLDERS_UNKNOWN"
+            veto_reasons.append(
+                "VETO_TOP10_UNVERIFIED: concentración sobre flotante no medible "
+                f"(fail-closed; sin dato: {vet_reason})"
+            )
         if chip_info["bundler_flag"]:
             score -= 38.0
             veto_reasons.append(chip_info["reason"])
-        elif chip_info["top10_float_pct"] > 30.0:
+        elif (chip_info["top10_float_pct"] or 0.0) > 30.0:
             score -= 28.0
             veto_reasons.append(chip_info["reason"])
         if wash_info["wash_trading_flag"]:
@@ -906,11 +1000,24 @@ class GMGNDossierScanner:
 
         # 9. Diagnóstico Causal: ¿Por qué sube o baja el token y cómo aprovecharlo?
         why_parts: List[str] = []
+        dev_txt = "N/D" if dev_balance_pct is None else f"{dev_balance_pct:.1f}%"
+        top10_raw_txt = (
+            "N/D" if chip_info["top10_raw_pct"] is None
+            else f"{chip_info['top10_raw_pct']:.1f}%"
+        )
+        top10_float_txt = (
+            "N/D" if chip_info["top10_float_pct"] is None
+            else f"{chip_info['top10_float_pct']:.1f}%"
+        )
+        bundler_txt = (
+            "N/D" if chip_info["estimated_bundler_pct"] is None
+            else f"{chip_info['estimated_bundler_pct']:.1f}%"
+        )
         if chip_info["bundler_flag"]:
             why_parts.append(
-                f"Trampa de Bundler Oculto: aunque el Dev muestra {dev_balance_pct:.1f}% y el Top 10 bruto es "
-                f"{chip_info['top10_raw_pct']:.1f}%, {chip_info['uniform_cluster_count']} billeteras poseen "
-                f"saldos idénticos en bloque 0 (~{chip_info['estimated_bundler_pct']:.1f}% empaquetado)."
+                f"Trampa de Bundler Oculto: aunque el Dev muestra {dev_txt} y el Top 10 bruto es "
+                f"{top10_raw_txt}, {chip_info['uniform_cluster_count']} billeteras poseen "
+                f"saldos idénticos en bloque 0 (~{bundler_txt} empaquetado)."
             )
         if wash_info["wash_trading_flag"]:
             why_parts.append(
@@ -919,10 +1026,20 @@ class GMGNDossierScanner:
                 f"para simular una tendencia alcista sin liquidez compradora real."
             )
         if dev_info["dev_factory_flag"] or dev_info["near_dev_ceiling_flag"]:
+            launches_txt = "N/D" if dev_info["total_launches"] is None else str(dev_info["total_launches"])
+            grad_txt = "N/D" if dev_info["graduated_count"] is None else str(dev_info["graduated_count"])
+            ath_txt = (
+                "N/D" if dev_info["best_ath_mc_usd"] is None
+                else f"${dev_info['best_ath_mc_usd']:,.0f}"
+            )
+            mc_rel_txt = (
+                "N/D" if dev_info["mc_vs_dev_ath_pct"] is None
+                else f"{dev_info['mc_vs_dev_ath_pct']:.1f}%"
+            )
             why_parts.append(
-                f"Techo de Descarga del Creador: el dev tiene historial {dev_info['graduated_count']}/{dev_info['total_launches']} "
-                f"graduados con techo máximo en ${dev_info['best_ath_mc_usd']:,.0f} USD (actualmente al "
-                f"{dev_info['mc_vs_dev_ath_pct']:.1f}% de su zona de dump)."
+                f"Techo de Descarga del Creador: el dev tiene historial {grad_txt}/{launches_txt} "
+                f"graduados con techo máximo en {ath_txt} USD (actualmente al "
+                f"{mc_rel_txt} de su zona de dump)."
             )
         if clone_factory_flag:
             why_parts.append(
@@ -932,7 +1049,7 @@ class GMGNDossierScanner:
         if not why_parts:
             why_parts.append(
                 f"Flujo Orgánico: tamaño medio por tx ${wash_info['avg_tx_m5_usd']:.2f} USD en 5m con "
-                f"concentración sobre flotante de {chip_info['top10_float_pct']:.1f}% y sin bundlers detectados."
+                f"concentración sobre flotante de {top10_float_txt} y sin bundlers detectados."
             )
 
         if admitted:
@@ -963,10 +1080,21 @@ class GMGNDossierScanner:
             sell_tax_pct=sell_tax_pct,
             top10_raw_pct=chip_info["top10_raw_pct"],
             top10_float_pct=chip_info["top10_float_pct"],
+            top10_source=chip_info["top10_source"],
+            top10_flag=chip_info["top10_flag"],
             tradeable_float_pct=chip_info["tradeable_float_pct"],
             dev_balance_pct=dev_balance_pct,
+            dev_balance_known=dev_balance_pct is not None,
             bundler_pct=chip_info["estimated_bundler_pct"],
+            bundler_source=chip_info["bundler_source"],
+            # El "sniper" del scanner es el MISMO estimador del clúster de
+            # bundlers: se declara como proxy, jamás como riesgo independiente.
             sniper_pct=chip_info["estimated_bundler_pct"],
+            sniper_source=(
+                "proxy:bundler_uniform_cluster"
+                if chip_info["estimated_bundler_pct"] is not None else "unavailable"
+            ),
+            sniper_is_proxy=chip_info["estimated_bundler_pct"] is not None,
             uniform_cluster_count=chip_info["uniform_cluster_count"],
             holder_entropy=chip_info["holder_entropy"],
             bundler_flag=chip_info["bundler_flag"],
@@ -993,6 +1121,7 @@ class GMGNDossierScanner:
             dev_total_launches=dev_info["total_launches"],
             dev_graduated_count=dev_info["graduated_count"],
             dev_best_ath_mc_usd=dev_info["best_ath_mc_usd"],
+            dev_history_known=dev_info["history_known"],
             dev_factory_flag=dev_info["dev_factory_flag"],
             near_dev_ceiling_flag=dev_info["near_dev_ceiling_flag"],
             composite_dd_score=composite_score,
