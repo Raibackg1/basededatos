@@ -618,3 +618,64 @@ del bundler presentado como medición independiente.
 5. `scripts/check_claims.py` cuelga (> 15 min sin salida) y no forma parte de `verify.ps1`; deuda abierta.
 6. El gate de dinero real sigue cerrado: **7 cierres forward** frente a N≥100, `edge_demostrado=False`. Fase 0 no cambia ninguna expectativa de rentabilidad.
 
+---
+
+## Anexo K — Fase 1: lente de aprendizaje honesta sobre `shadow_veto_ledger` (2026-10-23, commit `46d94d8`)
+
+**Problema:** el veredicto almacenado del libro de vetos no era una medición, era una
+etiqueta optimista. `update_shadow_veto_price` marcaba `TRUE_SAVE` cuando el trough tocaba
+`≤ −25%` **en cualquier momento**, aunque el PnL contrafactual final fuera positivo: un token
+vetado que cayó un 25% y luego cerró **+217.73%** contaba como "capital salvado". La precisión
+almacenada era 95.97% (119 verdaderos de 124 resueltos); la precisión honesta es **87.5%**
+(112 de 128). Además `upsert_shadow_veto` inserta `counterfactual_pnl_pct = 0.0` como default
+para filas `PENDING`: leer ese cero como "empate medido" reintroducía la falacia que la Fase 0
+erradicó.
+
+**Entregado (3 archivos + 1 test, autorización §8):**
+
+| Archivo | Cambio |
+|---|---|
+| `detector/auto_evolution.py` | Regla **`cf_net_v1`** que recalcula el estado desde campos crudos (`counterfactual_pnl_pct`, `entry_mc_usd`, `trough_mc_usd`, `checks_count`) e **ignora la etiqueta almacenada**. Estados: `SAVED` (cf<0), `CLEAR_FALSE_VETO` (cf≥28 y sin tocar SL), **`AMBIGUOUS_PATH`** (tocó ≤−33.49% y cerró ≥0: el orden de los ticks no está en la DB, no se elige un relato), `COSTLY` y `PENDING`. `PENDING` si `verdict=="PENDING"`, `checks_count<=0` o `cf is None`: **el cero por defecto no es una medición**. `canonical_branch()` mapea texto libre a ramas canónicas y devuelve `UNCLASSIFIED` sin inventar ramas. `get_status_summary()` reporta contadores honestos sobre todo el ledger, expone `stored_*` + `label_discrepancy`, y devuelve `save_accuracy_pct=None` con 0 resueltos (nunca 100.0). |
+| `cockpit/server.py` | `GET /api/learning/veto-patterns` (503 sin store) con `label_rule`, `totals`, `label_discrepancy`, `branches[]` (`gate` VALID sólo con N≥30, `claim=null` siempre), `gate_progress` y `warnings[]` — incluido el aviso de filas `PENDING` con `cf=0.0` por defecto. |
+| `cockpit/static/index.html` | Panel de ancho completo **"Lente de aprendizaje · Shadow Vetos"** en Análitica: nota de regla, gate 7/100 con barra, tabla de ramas con badge `VÁLIDA / NO CONCLUYENTE` y `N/D — sin dato` cuando la mediana no existe, y bloque de advertencias. Enganchado a `switchMainMode('analytics')`, `refreshAll()` y el polling. |
+| `tests/test_veto_analytics.py` | **34 contratos**: estados, ambigüedad de orden de ticks, cero por defecto, `PENDING` con veredicto contradictorio, mediana sólo sobre resueltos, ruptura de umbral, `canonical_branch` sin ramas inventadas, discrepancia almacenada, gate N≥30, endpoint y presencia del panel. |
+
+**Evidencia:**
+- Suite completa → **608 passed + 17 subtests** (base 574 → 608, +34 exactos; sin regresiones).
+- `scripts/verify.ps1` → **VERIFY OK** (exit 0): WR 12.55%, PF 0.269, PnL −79,770.96 USD, N=5,021 cerradas.
+- `scripts/agent_gate.py` → 0 bloqueos · 0 avisos.
+- En vivo (`:8000/api/learning/veto-patterns`): `ledger=349`, `resolved=128`, `pending=221`,
+  `saved=112`, `costly=4`, `clear_false_veto=7`, `ambiguous_path=5`,
+  `pending_zero_default=221`, `save_accuracy_pct=87.5`.
+  `label_discrepancy`: `checked=128`, `stored_mismatch=7`, `true_save_with_positive_cf=7`.
+  `gate_progress`: `closed_forward=7`, `required=100`, `remaining=93`, `branch_attributed=0`,
+  `manual_only=7`, `edge_demostrado=false`, `money_gate_open=false`.
+- Ramas (resueltos / pendientes): `SAME_NAME_CLONE` 65/166 **VÁLIDA** (58 salvadas, 1 costosa,
+  5 falso-veto claro, 1 ambigua, mediana −78.60%); `UNVERIFIED_METRICS` 35/26 **VÁLIDA**
+  (30/1/1/3, −73.66%); `BUNDLER_CLUSTER` 17/14, `TOP10_CONCENTRATION` 8/8,
+  `DEV_HOLDING` 2/4, `WASH_TRADING` 1/2, `LIQUIDITY_ANEMIC` 0/1 — todas **NO CONCLUYENTE**.
+  Todas con `claim=null`.
+- `/api/evolution/status`: `shadow_summary` honesto (`true_saves=112`, `false_vetos=7`,
+  `save_accuracy_pct=87.5`, `stored_true_saves=119`, `stored_false_vetos=5`).
+  `/api/bot/status` conserva las claves del contrato de escritorio
+  (`true_saves`, `false_vetos`, `avoided_loss_pct`, `evolutions_count`, `last_rule_change`).
+- Render real en Edge (Playwright, `channel="msedge"`): panel visible, 0 errores de consola,
+  captura en `%TEMP%\opencode\veto_panel.png`; JS embebido pasa `node --check`.
+
+**Riesgos residuales declarados:**
+1. **Escritor con default 0.0.** `live_store.upsert_shadow_veto` sigue insertando
+   `counterfactual_pnl_pct=0.0` para filas `PENDING` (221 filas hoy). La lente lo detecta y lo
+   declara (`pending_zero_default` + advertencia), pero el arreglo de raíz es Fase 1b
+   (`NULL` en el INSERT). Mientras tanto, ninguna fila `PENDING` entra en las tasas.
+2. **`AMBIGUOUS_PATH` no es un veredicto, es una abstención.** Distinguir "SL y luego rebote" de
+   "rebote y luego SL" exige la serie de ticks, que el ledger no guarda. Hoy son 5 casos; no se
+   resuelven por conveniencia.
+3. **`branch_attributed=0`.** Los 7 cierres forward son `COCKPIT_MANUAL`: no hay evidencia
+   atribuida a ninguna rama de estrategia, así que ninguna rama puede reclamar edge.
+4. **Etiquetas almacenadas obsoletas.** 7 filas conservan `TRUE_SAVE` con CF PnL positivo; se
+   reportan pero no se reescriben (la historia no se reescribe, se audita).
+5. **`saved_rate_pct=100%` en `WASH_TRADING` es N=1.** Se muestra como no concluyente; no es un
+   hallazgo.
+6. El gate de dinero real sigue cerrado: **7/100 cierres forward**, `edge_demostrado=False`.
+   La lente mide vetos; no demuestra rentabilidad ni autoriza fondos reales.
+
