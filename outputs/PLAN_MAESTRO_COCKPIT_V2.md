@@ -581,3 +581,40 @@ sintéticos; cero promesas de EV; mismo bloque `dashboard` para exe, web y agent
 3. `audit_token` por CLI con campos parciales ahora devuelve `UNVERIFIED` (antes fabricaba PASS): consumidores deben leer `metrics_known`.
 4. El alias bundler (`sniper_pct` si ≥25%, si no 0.0) se conserva como proxy medido (continuidad BP-006) cuando la fuente no expone `bundler_pct`.
 
+---
+
+## Anexo J — Fase 0: integridad de features en `token_dossiers` (2026-10-22, commit `92fab6e`)
+
+**Problema:** la tabla de expedientes forenses no distinguía *medido* de *inventado*. Las columnas
+`top10_float_pct`, `dev_balance_pct`, `bundler_pct`, `sniper_pct`, `dev_total_launches` y
+`dev_best_ath_mc_usd` eran `NOT NULL DEFAULT 0`, de modo que un token sin fuente de holders se
+persistía como "0% de concentración" y "0 lanzamientos del creador": dos aprobaciones falsas.
+Además `top10_float_pct` podía sintetizarse desde el score de RugCheck, y `sniper_pct` era un alias
+del bundler presentado como medición independiente.
+
+**Entregado (3 archivos + 1 test, autorización §8):**
+
+| Archivo | Cambio |
+|---|---|
+| `detector/live_store.py` | Columnas de medición pasan a **NULL-able**; añade procedencia por fila (`top10_source`, `top10_flag`, `bundler_source`, `sniper_source`, `sniper_is_proxy`, `dev_balance_known`, `dev_history_known`). Migración **idempotente** por rebuild+copy, con backfill de filas legacy a `legacy_unverified` (no se puede saber si sus ceros fueron medidos). Coercers `_opt_float`/`_opt_int` para no convertir `None` en `0`. |
+| `detector/gmgn_dossier_scanner.py` | `resolve_top10_float()`: sin flotante o con denominador < 20 → `None` (`TOP10_DENOMINATOR_UNRELIABLE`), > 100 → `TOP10_EXCEEDS_FLOAT`; holders vacíos → todo `None` con `chip_source="unavailable"`; **se elimina** el proxy RugCheck que fabricaba concentración. Nuevo veto fail-closed **`VETO_TOP10_UNVERIFIED`**. Linaje de creador devuelve conteos `Optional` + `history_known` con razón `CREATOR_HISTORY_UNKNOWN` (antes 0 lanzamientos/0 graduados). `TokenDossier` con campos `Optional` y procedencia; f-strings con guardas `N/D`. |
+| `detector/gmgn_bridge.py` | `screen_tokens_to_buy` lee métricas críticas null-safe (`top10`, `dev`, `sniper`); si falta alguna, degrada explícitamente `metrics_known=False` en vez de comparar contra ceros. Corrige el `TypeError` latente del default ansioso de `bundler_pct`. |
+| `tests/test_feature_integrity.py` | **14 contratos** de integridad: esquema nullable, procedencia obligatoria, `resolve_top10_float` en sus tres estados, veto fail-closed, linaje desconocido, bridge null-safe, migración idempotente y no-destrucción de sumas. |
+
+**Evidencia:**
+- Suite completa → **574 passed + 17 subtests** (base 560 → 574, +14 exactos; sin regresiones).
+- `scripts/verify.ps1` → **VERIFY OK** (exit 0): STATE.json fresco, gate 0 bloqueos, guard causal y ciclo honesto OK. WR medido 12.55%, PF 0.269, PnL −79,771 USD, N=5,021 cerradas (sin cambios).
+- `scripts/agent_gate.py` → 0 bloqueos · 0 avisos.
+- Migración ensayada dos veces sobre copias de la DB real: 292 filas preservadas, `SUM(top10_float_pct)` y `SUM(dev_total_launches)` idénticas antes/después.
+- Aplicada en vivo a `cockpit/runtime/cockpit_forward.db`: **296 filas**, todas las columnas objetivo `notnull=0`, procedencia presente (`top10_source`: 292 `legacy_unverified`, 3 `measured`, 1 `unavailable`), sumas de integridad intactas.
+- Sin regresión de admisión: **292 VETO + 4 STRONG_BUY** (los 4 legacy) + 1 nuevo `VETO_TOP10_UNVERIFIED` sobre el único token sin medición (`WORLD`, `TOP10_DENOMINATOR_UNRELIABLE`).
+- Auditoría real (`POST /api/gmgn/audit` con mint medido): `FAIL / RUG_PULL_SIGNATURE`, `top10 59.57`, `metrics_known=True`. Sin fuente: `UNVERIFIED` con métricas `null` (no PASS falso).
+
+**Riesgos residuales declarados:**
+1. `dev_history_known=0` en **296/296** expedientes: la ruta viva nunca entrega `dev_stats`, así que **BP-008 (creador serial) no evalúa**. Ahora se declara desconocido en vez de "0 lanzamientos": hueco preexistente, etiquetado.
+2. `sniper_pct` sigue siendo numéricamente igual a `bundler_pct` (alias). Consumidores deben mirar `sniper_is_proxy`/`sniper_source`; **no** es una medición independiente de snipers de bloque 0.
+3. `/api/gmgn/tokens` aún emite `top10_concentration_pct=0.0` para snapshots sin métricas, pero acompañado de `metrics_known=False` (residual declarado, no silencioso).
+4. 292 filas legacy quedan como `legacy_unverified` para siempre: son historia no auditable, no evidencia.
+5. `scripts/check_claims.py` cuelga (> 15 min sin salida) y no forma parte de `verify.ps1`; deuda abierta.
+6. El gate de dinero real sigue cerrado: **7 cierres forward** frente a N≥100, `edge_demostrado=False`. Fase 0 no cambia ninguna expectativa de rentabilidad.
+
