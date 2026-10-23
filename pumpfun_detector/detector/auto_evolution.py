@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import statistics
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +52,231 @@ def _sf(val: Any, default: float = 0.0) -> float:
         return float(val) if val is not None else default
     except (ValueError, TypeError):
         return default
+
+
+def _opt_float(val: Any) -> Optional[float]:
+    """Convierte a float sólo si hay un número finito real; nunca inventa 0.0."""
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        out = float(val)
+    except (ValueError, TypeError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+# ---------------------------------------------------------------------------
+# Fase 1 — "Lente de aprendizaje" honesta sobre shadow_veto_ledger
+#
+# La columna `verdict` la escribe el ticker contrafactual y NO es verdad por sí
+# sola: `update_shadow_veto_price` marca TRUE_SAVE si el trough tocó -25% en
+# cualquier momento, aunque el token terminara +200%. Aquí se recalcula la
+# etiqueta desde los campos crudos (CF PnL neto y drawdown real) y se declara
+# la discrepancia en vez de heredarla.
+# ---------------------------------------------------------------------------
+LABEL_RULE_VERSION = "cf_net_v1"
+MIN_EVIDENCE_N = 30
+# AGENTS.md §3: el SL de pánico real pierde -30% a -35% (media auditada -33.49%).
+SL_PANIC_PCT = -33.49
+# Umbral declarado del ledger original para "falso veto claro" (+28% neto).
+FALSE_VETO_THRESHOLD_PCT = 28.0
+
+HONEST_STATES = ("SAVED", "COSTLY", "CLEAR_FALSE_VETO", "AMBIGUOUS_PATH", "PENDING")
+
+#: reglas de texto libre -> rama canónica (sobre texto plegado: sin acentos,
+#: mayúsculas). El orden importa: la primera coincidencia gana.
+_BRANCH_RULES = (
+    ("SAME_NAME_CLONE", ("SAME_NAME_CLONE", "CLON HOMONIMO", "FABRICA")),
+    ("UNVERIFIED_METRICS", ("UNVERIFIED_METRICS",)),
+    ("BUNDLER_CLUSTER", ("BUNDLER",)),
+    ("WASH_TRADING", ("WASH_TRADING", "WASH TRADING")),
+    ("TOP10_CONCENTRATION", ("CONCENTRACION DE CABAL", "TOP10_CONCENTRATION")),
+    ("DEV_HOLDING", ("DEV HOLDING", "DEV_HOLDING")),
+    ("LIQUIDITY_ANEMIC", ("LIQUIDEZ ANEMICA", "LIQUIDITY_ANEMIC")),
+)
+
+
+def _fold(text: Any) -> str:
+    raw = str(text or "").strip().upper()
+    return "".join(c for c in unicodedata.normalize("NFKD", raw) if not unicodedata.combining(c))
+
+
+def canonical_branch(veto_reason: Any) -> str:
+    """Rama canónica del veto. Texto libre no reconocido => ``UNCLASSIFIED``.
+
+    No se inventan ramas nuevas a partir del prefijo ``VETO_*``: si un motivo
+    no está en el mapa, se declara sin clasificar y se cuenta como tal.
+    """
+    folded = _fold(veto_reason)
+    if not folded:
+        return "UNCLASSIFIED"
+    for branch, needles in _BRANCH_RULES:
+        if any(needle in folded for needle in needles):
+            return branch
+    return "UNCLASSIFIED"
+
+
+def honest_outcome(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Etiqueta honesta de un veto, calculada sólo desde campos crudos.
+
+    Regla ``cf_net_v1``:
+
+    - ``cf < 0``                        -> ``SAVED`` (comprar habría perdido neto)
+    - ``cf >= 28`` y sin tocar el SL    -> ``CLEAR_FALSE_VETO``
+    - tocó ``<= -33.49%`` y cerró >= 0  -> ``AMBIGUOUS_PATH`` (el orden de los
+      ticks no está en la DB: pudo ser SL y luego rebote, o rebote y luego SL)
+    - resto                            -> ``COSTLY``
+    - sin medición                     -> ``PENDING``
+
+    ``PENDING`` no se decide por el CF PnL: ``upsert_shadow_veto`` inserta
+    ``counterfactual_pnl_pct = 0.0`` como valor por defecto, así que un cero
+    con ``checks_count = 0`` es ausencia de medición, no un empate.
+    """
+    verdict = str(row.get("verdict") or "").strip().upper() or None
+    cf = _opt_float(row.get("counterfactual_pnl_pct"))
+    checks = _opt_float(row.get("checks_count"))
+    entry = _opt_float(row.get("entry_mc_usd"))
+    trough = _opt_float(row.get("trough_mc_usd"))
+
+    drawdown = None
+    if entry is not None and entry > 0.0 and trough is not None:
+        drawdown = round((trough - entry) / entry * 100.0, 2)
+
+    never_ticked = checks is not None and checks <= 0
+    if cf is None or verdict == "PENDING" or never_ticked:
+        state = "PENDING"
+    elif cf < 0.0:
+        state = "SAVED"
+    elif cf >= FALSE_VETO_THRESHOLD_PCT and (drawdown is None or drawdown > SL_PANIC_PCT):
+        state = "CLEAR_FALSE_VETO"
+    elif drawdown is not None and drawdown <= SL_PANIC_PCT:
+        state = "AMBIGUOUS_PATH"
+    else:
+        state = "COSTLY"
+
+    if state == "PENDING" or verdict is None:
+        stored_ok: Optional[bool] = None
+    else:
+        expected = {
+            "SAVED": "TRUE_SAVE",
+            "CLEAR_FALSE_VETO": "FALSE_VETO",
+            "COSTLY": "NEUTRAL_HOLD",
+            "AMBIGUOUS_PATH": "NEUTRAL_HOLD",
+        }[state]
+        stored_ok = verdict == expected
+
+    return {
+        "state": state,
+        "cf_pnl_pct": cf,
+        "trough_drawdown_pct": drawdown,
+        "stored_verdict": verdict,
+        "stored_label_ok": stored_ok,
+        "label_rule_version": LABEL_RULE_VERSION,
+    }
+
+
+def summarize_veto_patterns(
+    rows: Optional[List[Dict[str, Any]]],
+    min_n: int = MIN_EVIDENCE_N,
+) -> Dict[str, Any]:
+    """Agrega el ledger por rama canónica con puerta de evidencia N>=30.
+
+    Nunca emite una afirmación de edge: ``claim`` es siempre ``None`` y
+    ``edge_demostrado`` siempre ``False``. Las tasas se calculan **sólo sobre
+    filas resueltas** y se declara cuántas quedan pendientes.
+    """
+    min_n = int(min_n)
+    buckets: Dict[str, Dict[str, Any]] = {}
+    cfs: Dict[str, List[float]] = {}
+    totals = {
+        "ledger": 0, "resolved": 0, "pending": 0, "saved": 0, "costly": 0,
+        "clear_false_veto": 0, "ambiguous_path": 0, "unclassified_resolved": 0,
+        "pending_zero_default": 0, "save_accuracy_pct": None,
+    }
+    discrepancy = {"checked": 0, "stored_mismatch": 0, "true_save_with_positive_cf": 0}
+
+    for raw in rows or []:
+        if not hasattr(raw, "keys"):
+            continue
+        row = raw if isinstance(raw, dict) else dict(raw)  # type: ignore[arg-type]
+        branch = canonical_branch(row.get("veto_reason"))
+        out = honest_outcome(row)
+        state = out["state"]
+        bucket = buckets.setdefault(branch, {
+            "branch": branch, "n_total": 0, "n_resolved": 0, "n_pending": 0,
+            "saved": 0, "costly": 0, "clear_false_veto": 0, "ambiguous_path": 0,
+        })
+        totals["ledger"] += 1
+        bucket["n_total"] += 1
+
+        if state == "PENDING":
+            totals["pending"] += 1
+            bucket["n_pending"] += 1
+            if out["cf_pnl_pct"] == 0.0:
+                # Cero por defecto del INSERT, no una medición de empate.
+                totals["pending_zero_default"] += 1
+            continue
+
+        totals["resolved"] += 1
+        bucket["n_resolved"] += 1
+        key = {
+            "SAVED": "saved",
+            "COSTLY": "costly",
+            "CLEAR_FALSE_VETO": "clear_false_veto",
+            "AMBIGUOUS_PATH": "ambiguous_path",
+        }[state]
+        totals[key] += 1
+        bucket[key] += 1
+        if branch == "UNCLASSIFIED":
+            totals["unclassified_resolved"] += 1
+        if out["cf_pnl_pct"] is not None:
+            cfs.setdefault(branch, []).append(float(out["cf_pnl_pct"]))
+
+        discrepancy["checked"] += 1
+        if out["stored_label_ok"] is False:
+            discrepancy["stored_mismatch"] += 1
+        if (out["stored_verdict"] == "TRUE_SAVE"
+                and out["cf_pnl_pct"] is not None and out["cf_pnl_pct"] > 0.0):
+            discrepancy["true_save_with_positive_cf"] += 1
+
+    branches: List[Dict[str, Any]] = []
+    for branch, bucket in buckets.items():
+        resolved = bucket["n_resolved"]
+        values = cfs.get(branch) or []
+        bucket["median_cf_pnl_pct"] = round(statistics.median(values), 2) if values else None
+        bucket["saved_rate_pct"] = round(bucket["saved"] / resolved * 100.0, 1) if resolved else None
+        bucket["false_veto_rate_pct"] = (
+            round(bucket["clear_false_veto"] / resolved * 100.0, 1) if resolved else None
+        )
+        bucket["min_n"] = min_n
+        bucket["gate"] = "VALID" if resolved >= min_n else "UNVERIFIED"
+        bucket["claim"] = None
+        branches.append(bucket)
+
+    branches.sort(key=lambda b: (-b["n_resolved"], -b["n_total"], b["branch"]))
+
+    if totals["resolved"] > 0:
+        totals["save_accuracy_pct"] = round(
+            totals["saved"] / totals["resolved"] * 100.0, 1
+        )
+
+    return {
+        "schema": "learning/veto-patterns/1",
+        "generated_ts": round(time.time(), 3),
+        "label_rule_version": LABEL_RULE_VERSION,
+        "label_rule": {
+            "version": LABEL_RULE_VERSION,
+            "sl_panic_pct": SL_PANIC_PCT,
+            "false_veto_threshold_pct": FALSE_VETO_THRESHOLD_PCT,
+            "states": list(HONEST_STATES),
+        },
+        "min_n": min_n,
+        "totals": totals,
+        "label_discrepancy": discrepancy,
+        "branches": branches,
+        "edge_demostrado": False,
+    }
+
 
 
 def _extract_market_cap(snap: Any) -> float:
@@ -431,21 +659,33 @@ class AutoEvolutionEngine:
         return event_payload
 
     def get_status_summary(self) -> Dict[str, Any]:
-        """Devuelve el estado completo del motor de auto-evolución y del libro de sombra (Shadow Vetos)."""
+        """Estado del motor de auto-evolución y del libro de sombra (Shadow Vetos).
+
+        Los contadores se calculan con la regla honesta ``cf_net_v1`` sobre
+        **todo** el ledger (no sobre las últimas 30 filas) y se contrastan con
+        la etiqueta almacenada. Sin filas resueltas, ``save_accuracy_pct`` es
+        ``None``: nunca se fabrica un 100%.
+        """
         shadow_rows: List[Dict[str, Any]] = []
+        shadow_all: List[Dict[str, Any]] = []
         evo_events: List[Dict[str, Any]] = []
         if self.store is not None:
             if hasattr(self.store, "list_shadow_vetos"):
-                shadow_rows = self.store.list_shadow_vetos(limit=30)
+                # El ledger completo alimenta el resumen; la lista cruda que ve
+                # el dashboard se recorta después para no inflar la respuesta.
+                shadow_all = self.store.list_shadow_vetos(limit=100000)
+                shadow_rows = shadow_all[:30]
             if hasattr(self.store, "list_evolution_events"):
                 evo_events = self.store.list_evolution_events(limit=30)
 
-        true_saves = sum(1 for r in shadow_rows if r.get("verdict") == "TRUE_SAVE")
-        false_vetos = sum(1 for r in shadow_rows if r.get("verdict") == "FALSE_VETO")
-        evaluated = true_saves + false_vetos
-        save_accuracy_pct = round((true_saves / evaluated) * 100.0, 1) if evaluated > 0 else 100.0
+        stats = summarize_veto_patterns(shadow_all)
+        totals = stats["totals"]
+        stored_true_saves = sum(1 for r in shadow_all if r.get("verdict") == "TRUE_SAVE")
+        stored_false_vetos = sum(1 for r in shadow_all if r.get("verdict") == "FALSE_VETO")
         avoided_loss_sum_pct = round(
-            sum(abs(_sf(r.get("counterfactual_pnl_pct"))) for r in shadow_rows if _sf(r.get("counterfactual_pnl_pct")) < 0),
+            sum(abs(_sf(r.get("counterfactual_pnl_pct")))
+                for r in shadow_all
+                if _sf(r.get("counterfactual_pnl_pct")) < 0),
             1,
         )
 
@@ -453,11 +693,19 @@ class AutoEvolutionEngine:
             "adaptive_rules": dict(self.rules),
             "decider_thresholds": self.get_effective_decider_thresholds(),
             "shadow_summary": {
-                "total_tracked": len(shadow_rows),
-                "true_saves": true_saves,
-                "false_vetos": false_vetos,
-                "save_accuracy_pct": save_accuracy_pct,
+                "total_tracked": totals["ledger"],
+                "resolved": totals["resolved"],
+                "pending": totals["pending"],
+                "true_saves": totals["saved"],
+                "false_vetos": totals["clear_false_veto"],
+                "costly_vetos": totals["costly"],
+                "ambiguous_path": totals["ambiguous_path"],
+                "save_accuracy_pct": totals["save_accuracy_pct"],
                 "avoided_loss_sum_pct": avoided_loss_sum_pct,
+                "label_rule_version": LABEL_RULE_VERSION,
+                "stored_true_saves": stored_true_saves,
+                "stored_false_vetos": stored_false_vetos,
+                "label_discrepancy": stats["label_discrepancy"],
             },
             "shadow_vetos": shadow_rows,
             "evolution_events": evo_events,

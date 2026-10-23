@@ -26,12 +26,17 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from pathlib import Path
 import sys
+
+try:
+    import psutil
+except ImportError:
+    psutil = None  # type: ignore
 _pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _pkg_root not in sys.path:
     sys.path.insert(0, _pkg_root)
 
 from detector.ai_engine import AIEngine
-from detector.auto_evolution import AutoEvolutionEngine
+from detector.auto_evolution import AutoEvolutionEngine, summarize_veto_patterns
 from detector.gmgn_bridge import GMGNBridge
 from detector.market_feed import MarketFeed
 from . import snapshot as snap_mod
@@ -415,7 +420,8 @@ class CockpitState:
     def stop_cycle_thread(self) -> None:
         self._stop_cycle.set()
         if self._cycle_thread is not None:
-            self._cycle_thread.join(timeout=2.0)
+            self._cycle_thread.join(timeout=10.0)
+            self._cycle_thread = None
 
     def _run_cycle_loop(self) -> None:
         """Una pasada del ciclo completo por intervalo (sin intervención manual)."""
@@ -867,6 +873,46 @@ def _make_handler(state: CockpitState):
         def log_message(self, fmt, *args):  # silencio: es una UI local
             return
 
+        def _is_request_safe(self) -> bool:
+            """Valida Host y Origin para prevenir ataques CSRF y DNS Rebinding."""
+            host = self.headers.get("Host", "").split(":")[0].strip().lower()
+            allowed_hosts = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+            server_host = str(getattr(self.server, "server_name", "127.0.0.1")).lower()
+            allowed_hosts.add(server_host)
+            if host and host not in allowed_hosts:
+                return False
+
+            origin = self.headers.get("Origin")
+            if origin:
+                parsed_origin = urlparse(origin)
+                origin_host = parsed_origin.hostname or ""
+                origin_host = origin_host.strip().lower()
+                if origin_host and origin_host not in allowed_hosts:
+                    return False
+
+            referer = self.headers.get("Referer")
+            if referer:
+                parsed_ref = urlparse(referer)
+                ref_host = parsed_ref.hostname or ""
+                ref_host = ref_host.strip().lower()
+                if ref_host and ref_host not in allowed_hosts:
+                    return False
+
+            return True
+
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            if not self._is_request_safe():
+                self.send_response(403)
+                self.end_headers()
+                return
+            origin = self.headers.get("Origin", "*")
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Access-Control-Max-Age", "86400")
+            self.end_headers()
+
         def _send_json(self, obj: Dict[str, Any], code: int = 200) -> None:
             try:
                 body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -874,6 +920,9 @@ def _make_handler(state: CockpitState):
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
+                origin = self.headers.get("Origin")
+                if origin and self._is_request_safe():
+                    self.send_header("Access-Control-Allow-Origin", origin)
                 self.end_headers()
                 self.wfile.write(body)
             except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
@@ -940,6 +989,8 @@ def _make_handler(state: CockpitState):
             route = self.path.split("?", 1)[0]
             if route in ("/", "/index.html"):
                 self._send_file(os.path.join(STATIC_DIR, "index.html"))
+            elif route == "/api/health":
+                self._send_json({"ok": True, "status": "alive", "time": datetime.now(timezone.utc).isoformat()})
             elif route == "/api/state":
                 self._send_json(state.state())
             elif route == "/api/filter":
@@ -993,6 +1044,81 @@ def _make_handler(state: CockpitState):
                 self._send_sse(state)
             elif route == "/api/evolution/status":
                 self._send_json({"ok": True, **state.evolution_engine.get_status_summary()})
+            elif route == "/api/learning/veto-patterns":
+                # Lente de aprendizaje: agrega TODO el ledger con la regla honesta
+                # cf_net_v1 y puerta N>=30. Nunca afirma edge (edge_demostrado=False).
+                try:
+                    store = state.store
+                    if store is None or not hasattr(store, "list_shadow_vetos"):
+                        self._send_json(
+                            {"ok": False, "error": "store no disponible (sin ledger de vetos)"}, 503
+                        )
+                        return
+                    ledger = store.list_shadow_vetos(limit=100000)
+                    payload = summarize_veto_patterns(ledger)
+
+                    closed_forward = None
+                    if hasattr(store, "count_outcomes"):
+                        try:
+                            closed_forward = int(store.count_outcomes())
+                        except Exception:
+                            closed_forward = None
+                    by_branch = []
+                    if hasattr(store, "net_audit_by_branch"):
+                        try:
+                            by_branch = store.net_audit_by_branch(origin=None) or []
+                        except Exception:
+                            by_branch = []
+                    manual_only = 0
+                    attributed = 0
+                    for item in by_branch:
+                        n = int(item.get("n") or 0)
+                        if str(item.get("branch") or "") == "COCKPIT_MANUAL":
+                            manual_only += n
+                        else:
+                            attributed += n
+
+                    required = 100
+                    payload["gate_progress"] = {
+                        "closed_forward": closed_forward,
+                        "required": required,
+                        "remaining": (max(0, required - closed_forward)
+                                      if closed_forward is not None else None),
+                        "branch_attributed": attributed,
+                        "manual_only": manual_only,
+                        "min_n_branch": 30,
+                        "edge_demostrado": False,
+                        "money_gate_open": False,
+                    }
+                    warnings: List[str] = []
+                    totals = payload.get("totals") or {}
+                    if totals.get("pending"):
+                        warnings.append(
+                            f"{totals['pending']}/{totals['ledger']} vetos siguen PENDING: "
+                            "las tasas se calculan sólo sobre resueltos."
+                        )
+                    if totals.get("pending_zero_default"):
+                        warnings.append(
+                            f"{totals['pending_zero_default']} filas PENDING traen "
+                            "counterfactual_pnl_pct=0.0 por defecto del escritor: "
+                            "son ausencia de medición, no empates."
+                        )
+                    disc = payload.get("label_discrepancy") or {}
+                    if disc.get("stored_mismatch"):
+                        warnings.append(
+                            f"{disc['stored_mismatch']} etiquetas almacenadas contradicen la "
+                            f"regla {payload.get('label_rule_version')} (incluye "
+                            f"{disc.get('true_save_with_positive_cf')} TRUE_SAVE con CF PnL > 0)."
+                        )
+                    if closed_forward is not None and closed_forward < required:
+                        warnings.append(
+                            f"Gate de dinero real cerrado: {closed_forward}/{required} cierres "
+                            f"forward, {attributed} atribuidos a una rama de estrategia."
+                        )
+                    payload["warnings"] = warnings
+                    self._send_json({"ok": True, **payload})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
             elif route == "/api/pipeline/live":
                 qs = parse_qs(urlparse(self.path).query)
                 try:
@@ -1062,19 +1188,21 @@ def _make_handler(state: CockpitState):
             elif route == "/api/ai/schema":
                 self._send_json({"ok": True, "schemas": state.ai.get_ai_schemas()})
             elif route == "/api/system/telemetry":
-                import psutil
-                try:
-                    cpu_pct = psutil.cpu_percent(interval=None)
-                    mem = psutil.virtual_memory()
-                    self._send_json({
-                        "ok": True,
-                        "cpu_percent": cpu_pct,
-                        "ram_used_mb": round((mem.total - mem.available) / (1024 * 1024), 1),
-                        "ram_total_mb": round(mem.total / (1024 * 1024), 1),
-                        "ram_percent": mem.percent,
-                    })
-                except Exception as e:
-                    self._send_json({"ok": False, "error": str(e)})
+                if psutil is None:
+                    self._send_json({"ok": False, "error": "psutil not available"})
+                else:
+                    try:
+                        cpu_pct = psutil.cpu_percent(interval=None)
+                        mem = psutil.virtual_memory()
+                        self._send_json({
+                            "ok": True,
+                            "cpu_percent": cpu_pct,
+                            "ram_used_mb": round((mem.total - mem.available) / (1024 * 1024), 1),
+                            "ram_total_mb": round(mem.total / (1024 * 1024), 1),
+                            "ram_percent": mem.percent,
+                        })
+                    except Exception as e:
+                        self._send_json({"ok": False, "error": str(e)})
             elif route == "/api/ai/browser/screenshot":
                 snap_path = state.ai.browser_agent.screenshot_path
                 if os.path.exists(snap_path):
@@ -1116,6 +1244,9 @@ def _make_handler(state: CockpitState):
                 self.send_error(404, "not found")
 
         def do_POST(self) -> None:  # noqa: N802
+            if not self._is_request_safe():
+                self._send_json({"ok": False, "error": "Forbidden: untrusted origin or host header"}, 403)
+                return
             route = self.path.split("?", 1)[0]
             if route == "/api/rebuild":
                 try:
@@ -1162,6 +1293,23 @@ def _make_handler(state: CockpitState):
                     size = float(params.get("size_sol", 1.0))
                     pos = state.gmgn.paper_trader.open_trade(mint, sym, mc, size_sol=size)
                     self._send_json({"ok": True, "position": asdict(pos)})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+            elif route == "/api/bot/control":
+                try:
+                    state.gmgn.paper_trader.auto_bot_enabled = not state.gmgn.paper_trader.auto_bot_enabled
+                    self._send_json({"ok": True, "auto_bot_enabled": state.gmgn.paper_trader.auto_bot_enabled})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+            elif route == "/api/bot/panic_close":
+                try:
+                    mints = list(state.gmgn.paper_trader.open_positions.keys())
+                    closed = []
+                    for m in mints:
+                        pos = state.gmgn.paper_trader.close_trade(m, reason="PANIC_UI")
+                        if pos is not None:
+                            closed.append(asdict(pos))
+                    self._send_json({"ok": True, "closed": len(closed), "positions": closed})
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, 400)
             elif route == "/api/evolution/run":

@@ -2155,6 +2155,32 @@
       </table>
     </section>
   </div>
+
+  <div class="an-grid">
+    <section class="an-panel" style="grid-column:1/-1;">
+      <div class="an-panel-head">
+        <span class="an-panel-title">Lente de aprendizaje · Shadow Vetos</span>
+        <span class="an-panel-note" id="lv-note">—</span>
+      </div>
+      <div id="lv-gate" class="an-empty">Cargando evidencia del ledger de vetos…</div>
+      <table class="an-table">
+        <thead>
+          <tr>
+            <th>Rama del filtro</th>
+            <th>Resueltos</th>
+            <th>Pendientes</th>
+            <th>Salvadas</th>
+            <th>Costosas</th>
+            <th>Falsos vetos</th>
+            <th>Mediana CF</th>
+            <th>Evidencia</th>
+          </tr>
+        </thead>
+        <tbody id="lv-branches"></tbody>
+      </table>
+      <div id="lv-warnings" class="an-panel-note" style="margin-top:8px;"></div>
+    </section>
+  </div>
 </main>
 
 <!-- =========================================================================
@@ -2324,6 +2350,7 @@ function switchMainMode(mode) {
   }
   if (mode === "analytics") {
     fetchPerformance();
+    fetchVetoPatterns();
   }
   if (mode === "tokens") {
     fetchWiring();
@@ -2344,6 +2371,7 @@ async function refreshAll() {
     fetchPipeline(),
     fetchEvolutionStatus(),
     fetchPerformance(),
+    fetchVetoPatterns(),
     fetchWiring()
   ]);
   showToast("Datos actualizados en tiempo real");
@@ -2397,7 +2425,7 @@ function startPolling() {
     pollTick += 1;
     const tasks = [fetchBotStatus(), fetchTokens(), fetchPipeline()];
     if (pollTick % 4 === 0) tasks.push(fetchEvolutionStatus());
-    if (currentMode === "analytics") tasks.push(fetchPerformance());
+    if (currentMode === "analytics") tasks.push(fetchPerformance(), fetchVetoPatterns());
     if (currentMode === "tokens") {
       tasks.push(fetchWiring());
       if (pollTick % 4 === 0) tasks.push(fetchTokenMemory());
@@ -2834,6 +2862,103 @@ function setPerformancePeriod(period, btn) {
   document.querySelectorAll(".an-period").forEach(b => b.classList.remove("active"));
   if (btn) btn.classList.add("active");
   fetchPerformance();
+}
+
+// =========================================================================
+// LENTE DE APRENDIZAJE (Fase 1): shadow vetos con regla honesta cf_net_v1.
+// Nunca afirma edge: el progreso del gate sale del payload, jamás de un literal.
+// =========================================================================
+let vetoPatternsData = null;
+
+async function fetchVetoPatterns() {
+  const gate = document.getElementById("lv-gate");
+  try {
+    const res = await fetch("/api/learning/veto-patterns");
+    const data = await res.json();
+    if (!data || !data.ok) {
+      if (gate) {
+        gate.innerHTML = `<div class="an-empty">Sin datos: ${escapeHtml(
+          (data && data.error) || "ledger de vetos no disponible"
+        )}</div>`;
+      }
+      return;
+    }
+    vetoPatternsData = data;
+    renderVetoPatterns(data);
+  } catch (err) {
+    console.error("Error fetching veto patterns:", err);
+    if (gate) gate.innerHTML = `<div class="an-empty">Sin datos: error de red</div>`;
+  }
+}
+
+function renderVetoPatterns(d) {
+  const note = document.getElementById("lv-note");
+  const gp = d.gate_progress || {};
+  if (note) {
+    note.textContent =
+      `regla ${nd(d.label_rule_version)} · N mínima ${nd(d.min_n, fmtInt.format)} · sin edge demostrado`;
+  }
+
+  const gate = document.getElementById("lv-gate");
+  if (gate) {
+    const closed = nd(gp.closed_forward, fmtInt.format);
+    const req = nd(gp.required, fmtInt.format);
+    const attributed = nd(gp.branch_attributed, fmtInt.format);
+    const measurable =
+      typeof gp.closed_forward === "number" &&
+      typeof gp.required === "number" &&
+      gp.required > 0;
+    const pct = measurable
+      ? Math.max(0, Math.min(100, (gp.closed_forward / gp.required) * 100))
+      : null;
+    const bar = pct === null
+      ? `<div class="an-empty">Progreso no medible: falta el conteo de cierres forward.</div>`
+      : `<div style="height:6px;background:#1b2230;border-radius:3px;overflow:hidden;margin:8px 0;">
+           <div style="height:6px;width:${pct.toFixed(1)}%;background:#3ba55d;"></div>
+         </div>`;
+    const totals = d.totals || {};
+    gate.innerHTML = `
+      <div><strong>Gate de dinero real: ${closed}/${req}</strong> cierres forward ·
+        ${attributed} atribuidos a una rama de estrategia ·
+        edge demostrado: ${gp.edge_demostrado === true ? "SÍ" : "NO"}</div>
+      ${bar}
+      <div class="an-panel-note">Ledger: ${nd(totals.ledger, fmtInt.format)} vetos ·
+        ${nd(totals.resolved, fmtInt.format)} resueltos ·
+        ${nd(totals.pending, fmtInt.format)} pendientes ·
+        salvadas honestas ${nd(totals.save_accuracy_pct, v => `${fmt2.format(v)}%`)} (sólo sobre resueltos)</div>`;
+  }
+
+  const body = document.getElementById("lv-branches");
+  if (body) {
+    const rows = Array.isArray(d.branches) ? d.branches : [];
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="8" class="an-empty" style="border:0;">Sin vetos registrados.</td></tr>`;
+    } else {
+      body.innerHTML = rows.map(b => {
+        const badge = b.gate === "VALID"
+          ? `<span class="ok">VÁLIDA (N≥${nd(b.min_n, fmtInt.format)})</span>`
+          : `<span class="bad">NO CONCLUYENTE (N=${nd(b.n_resolved, fmtInt.format)})</span>`;
+        return `<tr>
+          <td>${escapeHtml(b.branch)}</td>
+          <td>${nd(b.n_resolved, fmtInt.format)}</td>
+          <td>${nd(b.n_pending, fmtInt.format)}</td>
+          <td>${nd(b.saved, fmtInt.format)}</td>
+          <td>${nd(b.costly, fmtInt.format)}</td>
+          <td>${nd(b.clear_false_veto, fmtInt.format)}</td>
+          <td>${nd(b.median_cf_pnl_pct, fmtPctSign2)}</td>
+          <td>${badge}</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+
+  const warn = document.getElementById("lv-warnings");
+  if (warn) {
+    const list = Array.isArray(d.warnings) ? d.warnings : [];
+    warn.innerHTML = list.length
+      ? list.map(w => `<div>⚠ ${escapeHtml(w)}</div>`).join("")
+      : "Sin advertencias del ledger.";
+  }
 }
 
 function renderPerformanceEmpty(msg) {
